@@ -39,7 +39,7 @@ async function main() {
       { $set: { hlsStatus: 'processing', hlsError: null }, $unset: { hlsMasterPlaylistUrl: '', isHls: '' } }
     );
     try {
-      await transcodeToHls(id, '', 'https://tataiya.in', storage as 's3' | 'local');
+      await transcodeToHls(id, '', 'https://ashqe.app', storage as 's3' | 'local');
       console.log('  ✓ done', f.name);
     } catch (e: any) {
       console.error('  ✗', f.name, e?.message || e);

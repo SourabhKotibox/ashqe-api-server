@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run on the tataiya.in server to fix admin login 404.
+# Run on the ashqe.app server to fix admin login 404.
 # Usage: bash fix-live-api-routing.sh
 
 set -euo pipefail
@@ -42,4 +42,4 @@ curl -sS -o /dev/null -w "POST /api/auth/login => %{http_code}\n" \
   -H 'Content-Type: application/json' \
   -d '{"email":"admin@tataiya.com","password":"Tataiya@Admin2026"}' || true
 
-echo "Done. Try https://tataiya.in/admin/login"
+echo "Done. Try https://ashqe.app/admin/login"

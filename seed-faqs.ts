@@ -61,13 +61,13 @@ const FAQS = [
   {
     question: 'Video keeps buffering — what should I do?',
     answer:
-      'Check your connection, lower player quality, close other apps or tabs, and try again. If the issue continues, email support@tataiya.in.',
+      'Check your connection, lower player quality, close other apps or tabs, and try again. If the issue continues, email support@ashqe.app.',
     order: 9,
   },
   {
     question: 'How do I contact support?',
     answer:
-      'Email support@tataiya.in. For underage access concerns use safety@tataiya.in. Billing questions: billing@tataiya.in.',
+      'Email support@ashqe.app. For underage access concerns use safety@ashqe.app. Billing questions: billing@ashqe.app.',
     order: 10,
   },
 ];

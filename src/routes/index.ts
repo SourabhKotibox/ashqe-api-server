@@ -166,7 +166,7 @@ const router: FastifyPluginAsync = async (fastify) => {
             title: 'Welcome to Tataiya',
             text: 'Stream premium 18+ movies anytime. Subscribe for full access and downloads.',
             userName: 'Tataiya',
-            userEmail: 'system@tataiya.in',
+            userEmail: 'system@ashqe.app',
           },
           {
             type: 'promo',
@@ -174,7 +174,7 @@ const router: FastifyPluginAsync = async (fastify) => {
             title: 'Standard plan — ₹30/month',
             text: 'Unlock HD streaming and offline downloads with our Standard plan.',
             userName: 'Tataiya',
-            userEmail: 'system@tataiya.in',
+            userEmail: 'system@ashqe.app',
           },
         ];
         await NotificationLogModel.insertMany(defaults);
