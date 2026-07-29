@@ -27,7 +27,7 @@ export async function getS3Settings() {
     (settings as any)?.awsBucket ||
     process.env.AWS_S3_BUCKET_NAME ||
     process.env.AWS_BUCKET_NAME ||
-    'tataiya-ott';
+    'ashqe-ott';
   const pathStyle = !!(settings as any)?.awsPathStyleEndpoint;
   const storageDriver =
     (settings as any)?.storageDriver ||

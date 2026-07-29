@@ -142,7 +142,7 @@ export async function startMediaConvertHlsJob(opts: {
     ...(queue ? { Queue: queue } : {}),
     UserMetadata: {
       mediaFileId: opts.mediaFileId,
-      app: 'tataiya',
+      app: 'ashqe',
     },
     Settings: {
       TimecodeConfig: { Source: 'ZEROBASED' },
