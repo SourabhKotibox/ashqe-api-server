@@ -1,5 +1,5 @@
 /**
- * seed-pages.ts — Upsert Tataiya CMS pages (18+ movies theme).
+ * seed-pages.ts — Upsert Ashqe CMS pages (18+ movies theme).
  *
  * Usage:
  *   npx tsx seed-pages.ts
@@ -23,14 +23,14 @@ const PAGES: PageSeed[] = [
     title: 'Privacy Policy',
     slug: 'privacy-policy',
     order: 1,
-    metaTitle: 'Privacy Policy | Tataiya',
-    metaDescription: 'How Tataiya collects, uses, and protects your personal data on our 18+ movie streaming platform.',
+    metaTitle: 'Privacy Policy | Ashqe',
+    metaDescription: 'How Ashqe collects, uses, and protects your personal data on our 18+ movie streaming platform.',
     content: `<h1>Privacy Policy</h1>
 <p>Last updated: July 2026</p>
-<p>Tataiya ("we", "us", "our") operates an adult-oriented (18+) movie streaming service at <strong>ashqe.app</strong>. This Privacy Policy explains what information we collect, how we use it, and your choices.</p>
+<p>Ashqe ("we", "us", "our") operates an adult-oriented (18+) movie streaming service at <strong>ashqe.app</strong>. This Privacy Policy explains what information we collect, how we use it, and your choices.</p>
 
-<h2>1. Who Can Use Tataiya</h2>
-<p>Tataiya is intended <strong>only for adults aged 18 years and above</strong>. We do not knowingly collect personal data from anyone under 18. If we learn that a minor has created an account, we will delete it and related data.</p>
+<h2>1. Who Can Use Ashqe</h2>
+<p>Ashqe is intended <strong>only for adults aged 18 years and above</strong>. We do not knowingly collect personal data from anyone under 18. If we learn that a minor has created an account, we will delete it and related data.</p>
 
 <h2>2. Information We Collect</h2>
 <ul>
@@ -52,7 +52,7 @@ const PAGES: PageSeed[] = [
 </ul>
 
 <h2>4. Mature Content &amp; Sensitive Preferences</h2>
-<p>Because Tataiya hosts <strong>18+ / mature movies</strong>, viewing history and preferences may reflect adult themes. We treat this as sensitive usage data and do not sell it. We use it only to operate the service, personalize recommendations, and improve content discovery for adult users.</p>
+<p>Because Ashqe hosts <strong>18+ / mature movies</strong>, viewing history and preferences may reflect adult themes. We treat this as sensitive usage data and do not sell it. We use it only to operate the service, personalize recommendations, and improve content discovery for adult users.</p>
 
 <h2>5. Sharing of Information</h2>
 <p>We do not sell your personal information. We may share limited data with:</p>
@@ -75,7 +75,7 @@ const PAGES: PageSeed[] = [
 <p>Your data may be processed on servers in India or other regions used by our infrastructure providers, with appropriate safeguards.</p>
 
 <h2>10. Changes</h2>
-<p>We may update this policy from time to time. The "Last updated" date will change when we do. Continued use of Tataiya after changes means you accept the updated policy.</p>
+<p>We may update this policy from time to time. The "Last updated" date will change when we do. Continued use of Ashqe after changes means you accept the updated policy.</p>
 
 <h2>Contact</h2>
 <p>Privacy questions: <strong>privacy@ashqe.app</strong><br/>Support: <strong>support@ashqe.app</strong><br/>Website: <strong>https://ashqe.app</strong></p>`,
@@ -84,17 +84,17 @@ const PAGES: PageSeed[] = [
     title: 'Terms and Conditions',
     slug: 'terms-and-conditions',
     order: 2,
-    metaTitle: 'Terms and Conditions | Tataiya',
-    metaDescription: 'Terms of use for Tataiya — an 18+ adult movie streaming platform.',
+    metaTitle: 'Terms and Conditions | Ashqe',
+    metaDescription: 'Terms of use for Ashqe — an 18+ adult movie streaming platform.',
     content: `<h1>Terms and Conditions</h1>
 <p>Last updated: July 2026</p>
-<p>These Terms govern your use of Tataiya, an <strong>adults-only (18+)</strong> movie streaming service. By creating an account or using the service, you agree to these Terms and our Privacy Policy.</p>
+<p>These Terms govern your use of Ashqe, an <strong>adults-only (18+)</strong> movie streaming service. By creating an account or using the service, you agree to these Terms and our Privacy Policy.</p>
 
 <h2>1. Eligibility (18+ Only)</h2>
-<p>You must be at least <strong>18 years old</strong> to create an account or watch content on Tataiya. By using the service you represent that you are 18 or older and that accessing mature content is legal in your jurisdiction. Accounts for minors are prohibited and will be terminated.</p>
+<p>You must be at least <strong>18 years old</strong> to create an account or watch content on Ashqe. By using the service you represent that you are 18 or older and that accessing mature content is legal in your jurisdiction. Accounts for minors are prohibited and will be terminated.</p>
 
 <h2>2. Mature Content</h2>
-<p>Tataiya specializes in <strong>18+ movies</strong> that may include strong language, violence, sexual content, nudity, or other adult themes. Content is provided for entertainment to consenting adults. You are solely responsible for ensuring that viewing such material is appropriate and lawful for you.</p>
+<p>Ashqe specializes in <strong>18+ movies</strong> that may include strong language, violence, sexual content, nudity, or other adult themes. Content is provided for entertainment to consenting adults. You are solely responsible for ensuring that viewing such material is appropriate and lawful for you.</p>
 
 <h2>3. Accounts</h2>
 <ul>
@@ -122,10 +122,10 @@ const PAGES: PageSeed[] = [
 <p>You may cancel anytime in account settings. Access continues until the end of the paid period. Refunds are governed by our <a href="/page/refund-policy">Refund Policy</a>.</p>
 
 <h2>8. Disclaimers</h2>
-<p>Content is provided "as is." We do not guarantee uninterrupted availability, error-free playback, or that every title will remain in the catalogue. Opinions expressed in films do not necessarily reflect Tataiya's views.</p>
+<p>Content is provided "as is." We do not guarantee uninterrupted availability, error-free playback, or that every title will remain in the catalogue. Opinions expressed in films do not necessarily reflect Ashqe's views.</p>
 
 <h2>9. Limitation of Liability</h2>
-<p>To the fullest extent permitted by law, Tataiya is not liable for indirect, incidental, special, or consequential damages arising from your use of the service or any 18+ content you choose to watch.</p>
+<p>To the fullest extent permitted by law, Ashqe is not liable for indirect, incidental, special, or consequential damages arising from your use of the service or any 18+ content you choose to watch.</p>
 
 <h2>10. Termination</h2>
 <p>We may suspend or terminate accounts that violate these Terms, the age policy, or applicable law, without refund where termination is for misconduct.</p>
@@ -140,11 +140,11 @@ const PAGES: PageSeed[] = [
     title: 'Age Limits',
     slug: 'age-limits',
     order: 3,
-    metaTitle: 'Age Limits & 18+ Policy | Tataiya',
-    metaDescription: 'Tataiya is strictly 18+. Learn our age limits, ratings, and parental responsibility rules.',
+    metaTitle: 'Age Limits & 18+ Policy | Ashqe',
+    metaDescription: 'Ashqe is strictly 18+. Learn our age limits, ratings, and parental responsibility rules.',
     content: `<h1>Age Limits &amp; 18+ Policy</h1>
 <p>Last updated: July 2026</p>
-<p>Tataiya is an <strong>adults-only streaming platform</strong>. All catalogue titles are intended for viewers aged <strong>18 years and above</strong>.</p>
+<p>Ashqe is an <strong>adults-only streaming platform</strong>. All catalogue titles are intended for viewers aged <strong>18 years and above</strong>.</p>
 
 <h2>1. Hard Age Gate</h2>
 <ul>
@@ -153,7 +153,7 @@ const PAGES: PageSeed[] = [
   <li>We reserve the right to request age verification and to close accounts that appear to belong to minors.</li>
 </ul>
 
-<h2>2. What “18+” Means on Tataiya</h2>
+<h2>2. What “18+” Means on Ashqe</h2>
 <p>Movies may contain one or more of the following:</p>
 <ul>
   <li>Strong sexual content or nudity</li>
@@ -164,7 +164,7 @@ const PAGES: PageSeed[] = [
 <p>Individual titles may also show a numeric age rating (for example <strong>18+</strong>). When in doubt, treat every title as adult content.</p>
 
 <h2>3. Parental / Guardian Responsibility</h2>
-<p>Tataiya is <strong>not designed for children or family co-viewing</strong>. If you share devices:</p>
+<p>Ashqe is <strong>not designed for children or family co-viewing</strong>. If you share devices:</p>
 <ul>
   <li>Log out after watching</li>
   <li>Do not save passwords on shared devices used by minors</li>
@@ -173,13 +173,13 @@ const PAGES: PageSeed[] = [
 <p>Parents and guardians are responsible for preventing minors from accessing adult accounts and content.</p>
 
 <h2>4. Profiles &amp; Kids Mode</h2>
-<p>Tataiya does <strong>not</strong> offer a kids profile or under-18 catalogue. Do not create accounts for children.</p>
+<p>Ashqe does <strong>not</strong> offer a kids profile or under-18 catalogue. Do not create accounts for children.</p>
 
 <h2>5. Geographic &amp; Legal Compliance</h2>
-<p>Adult content laws vary by country and state. You must only use Tataiya where you are legally allowed to view 18+ material. You are responsible for complying with local law.</p>
+<p>Adult content laws vary by country and state. You must only use Ashqe where you are legally allowed to view 18+ material. You are responsible for complying with local law.</p>
 
 <h2>6. Reporting Underage Access</h2>
-<p>If you believe a minor has an account or is accessing Tataiya, email <strong>safety@ashqe.app</strong> with details. We will investigate and take appropriate action, including account deletion.</p>
+<p>If you believe a minor has an account or is accessing Ashqe, email <strong>safety@ashqe.app</strong> with details. We will investigate and take appropriate action, including account deletion.</p>
 
 <h2>Related Policies</h2>
 <ul>
@@ -192,11 +192,11 @@ const PAGES: PageSeed[] = [
     title: 'Content Guidelines',
     slug: 'content-guidelines',
     order: 4,
-    metaTitle: 'Content Guidelines | Tataiya',
-    metaDescription: 'How Tataiya labels and presents 18+ movies, and what we do not allow.',
+    metaTitle: 'Content Guidelines | Ashqe',
+    metaDescription: 'How Ashqe labels and presents 18+ movies, and what we do not allow.',
     content: `<h1>Content Guidelines</h1>
 <p>Last updated: July 2026</p>
-<p>These guidelines explain how Tataiya presents mature movies and what content standards we apply.</p>
+<p>These guidelines explain how Ashqe presents mature movies and what content standards we apply.</p>
 
 <h2>1. Adult Entertainment Focus</h2>
 <p>Our catalogue focuses on <strong>18+ movies</strong> — thrillers, drama, romance, horror, and other genres with adult themes. Titles are curated for adult audiences only.</p>
@@ -209,7 +209,7 @@ const PAGES: PageSeed[] = [
 </ul>
 
 <h2>3. What We Do Not Host</h2>
-<p>Tataiya does not permit:</p>
+<p>Ashqe does not permit:</p>
 <ul>
   <li>Any sexual content involving minors (or anyone who appears to be under 18) — zero tolerance</li>
   <li>Non-consensual real-world exploitation material</li>
@@ -219,7 +219,7 @@ const PAGES: PageSeed[] = [
 
 <h2>4. User Conduct Around Content</h2>
 <ul>
-  <li>Do not record, re-upload, or redistribute Tataiya streams</li>
+  <li>Do not record, re-upload, or redistribute Ashqe streams</li>
   <li>Do not use our titles to harass or target others</li>
   <li>Reviews and comments (where enabled) must stay lawful and respectful</li>
 </ul>
@@ -233,25 +233,25 @@ const PAGES: PageSeed[] = [
     title: 'Disclaimer',
     slug: 'disclaimer',
     order: 5,
-    metaTitle: 'Disclaimer | Tataiya',
-    metaDescription: 'Legal disclaimer for Tataiya 18+ movie streaming.',
+    metaTitle: 'Disclaimer | Ashqe',
+    metaDescription: 'Legal disclaimer for Ashqe 18+ movie streaming.',
     content: `<h1>Disclaimer</h1>
 <p>Last updated: July 2026</p>
 
 <h2>Adult Content</h2>
-<p>All content on Tataiya is intended for <strong>adults 18 years of age or older</strong>. By entering the site or app you confirm you are of legal age and wish to view mature material.</p>
+<p>All content on Ashqe is intended for <strong>adults 18 years of age or older</strong>. By entering the site or app you confirm you are of legal age and wish to view mature material.</p>
 
 <h2>No Professional Advice</h2>
 <p>Movies and related materials are for entertainment only. They do not constitute legal, medical, financial, or professional advice.</p>
 
 <h2>External Links</h2>
-<p>We may link to third-party sites or payment providers. Tataiya is not responsible for their content, privacy practices, or availability.</p>
+<p>We may link to third-party sites or payment providers. Ashqe is not responsible for their content, privacy practices, or availability.</p>
 
 <h2>Availability</h2>
 <p>Titles, features, and streaming quality may change or become unavailable without notice due to licensing, maintenance, or technical issues.</p>
 
 <h2>Liability</h2>
-<p>Your use of Tataiya is at your own risk. To the maximum extent permitted by law, Tataiya disclaims liability for damages arising from viewing decisions, account misuse, or service interruptions.</p>
+<p>Your use of Ashqe is at your own risk. To the maximum extent permitted by law, Ashqe disclaims liability for damages arising from viewing decisions, account misuse, or service interruptions.</p>
 
 <p>Questions: <strong>legal@ashqe.app</strong></p>`,
   },
@@ -259,10 +259,10 @@ const PAGES: PageSeed[] = [
     title: 'About Us',
     slug: 'about-us',
     order: 6,
-    metaTitle: 'About Tataiya',
-    metaDescription: 'Tataiya is an 18+ movie streaming platform for adult audiences.',
-    content: `<h1>About Tataiya</h1>
-<p>Tataiya is a premium <strong>adults-only (18+)</strong> OTT platform built for movie lovers who want bold storytelling, intense drama, thrillers, and mature cinema — streamed in high quality on web and mobile.</p>
+    metaTitle: 'About Ashqe',
+    metaDescription: 'Ashqe is an 18+ movie streaming platform for adult audiences.',
+    content: `<h1>About Ashqe</h1>
+<p>Ashqe is a premium <strong>adults-only (18+)</strong> OTT platform built for movie lovers who want bold storytelling, intense drama, thrillers, and mature cinema — streamed in high quality on web and mobile.</p>
 
 <h2>Our Focus</h2>
 <ul>
@@ -282,8 +282,8 @@ const PAGES: PageSeed[] = [
     title: 'Contact Us',
     slug: 'contact',
     order: 7,
-    metaTitle: 'Contact Us | Tataiya',
-    metaDescription: 'Contact Tataiya support, billing, legal, and safety teams.',
+    metaTitle: 'Contact Us | Ashqe',
+    metaDescription: 'Contact Ashqe support, billing, legal, and safety teams.',
     content: `<h1>Contact Us</h1>
 <p>We're here to help with accounts, billing, playback, and safety concerns on our 18+ movie platform.</p>
 
@@ -324,11 +324,11 @@ const PAGES: PageSeed[] = [
     title: 'Cookie Policy',
     slug: 'cookie-policy',
     order: 8,
-    metaTitle: 'Cookie Policy | Tataiya',
-    metaDescription: 'How Tataiya uses cookies on our 18+ streaming website.',
+    metaTitle: 'Cookie Policy | Ashqe',
+    metaDescription: 'How Ashqe uses cookies on our 18+ streaming website.',
     content: `<h1>Cookie Policy</h1>
 <p>Last updated: July 2026</p>
-<p>This policy explains how Tataiya uses cookies and similar technologies on <strong>ashqe.app</strong>.</p>
+<p>This policy explains how Ashqe uses cookies and similar technologies on <strong>ashqe.app</strong>.</p>
 
 <h2>What Are Cookies?</h2>
 <p>Cookies are small files stored on your device that help the site remember logins, preferences, and usage patterns.</p>
@@ -353,16 +353,16 @@ const PAGES: PageSeed[] = [
     title: 'Help Center',
     slug: 'help',
     order: 9,
-    metaTitle: 'Help Center | Tataiya',
-    metaDescription: 'Help for Tataiya accounts, subscriptions, streaming, and 18+ access.',
+    metaTitle: 'Help Center | Ashqe',
+    metaDescription: 'Help for Ashqe accounts, subscriptions, streaming, and 18+ access.',
     content: `<h1>Help Center</h1>
-<p>Quick answers for Tataiya — 18+ movie streaming.</p>
+<p>Quick answers for Ashqe — 18+ movie streaming.</p>
 
 <h2>Age &amp; Access</h2>
-<h3>Why is Tataiya 18+ only?</h3>
+<h3>Why is Ashqe 18+ only?</h3>
 <p>Our catalogue contains mature movies. You must be 18 or older. See <a href="/page/age-limits">Age Limits</a>.</p>
 <h3>Is there a kids mode?</h3>
-<p>No. Tataiya does not offer children's profiles or family catalogues.</p>
+<p>No. Ashqe does not offer children's profiles or family catalogues.</p>
 
 <h2>Account &amp; Subscription</h2>
 <h3>How do I subscribe?</h3>
@@ -390,11 +390,11 @@ const PAGES: PageSeed[] = [
     title: 'Refund Policy',
     slug: 'refund-policy',
     order: 10,
-    metaTitle: 'Refund Policy | Tataiya',
-    metaDescription: 'Refund and billing policy for Tataiya subscriptions.',
+    metaTitle: 'Refund Policy | Ashqe',
+    metaDescription: 'Refund and billing policy for Ashqe subscriptions.',
     content: `<h1>Refund Policy</h1>
 <p>Last updated: July 2026</p>
-<p>Please read this before subscribing to Tataiya.</p>
+<p>Please read this before subscribing to Ashqe.</p>
 
 <h2>General Rule</h2>
 <p>Subscription fees are generally <strong>non-refundable</strong> for partial periods. When you pay, you purchase access for that billing cycle.</p>

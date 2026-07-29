@@ -1,5 +1,5 @@
 /**
- * seed-faqs.ts — Upsert Tataiya FAQs (18+ movies theme).
+ * seed-faqs.ts — Upsert Ashqe FAQs (18+ movies theme).
  *
  * Usage:
  *   npx tsx seed-faqs.ts
@@ -11,13 +11,13 @@ const uri = process.env.MONGODB_URI!;
 
 const FAQS = [
   {
-    question: 'Is Tataiya only for adults (18+)?',
+    question: 'Is Ashqe only for adults (18+)?',
     answer:
-      'Yes. Tataiya is an adults-only movie platform. You must be 18 years or older to create an account and stream. There is no kids mode or under-18 catalogue.',
+      'Yes. Ashqe is an adults-only movie platform. You must be 18 years or older to create an account and stream. There is no kids mode or under-18 catalogue.',
     order: 1,
   },
   {
-    question: 'What kind of movies are on Tataiya?',
+    question: 'What kind of movies are on Ashqe?',
     answer:
       'We focus on 18+ movies across genres such as drama, thriller, romance, horror, and other mature titles. Individual titles may show an 18+ age rating.',
     order: 2,
@@ -49,7 +49,7 @@ const FAQS = [
   {
     question: 'Why am I asked to confirm I am 18+?',
     answer:
-      'Because our catalogue contains mature content. Confirming your age is required before using Tataiya. Sharing your account with minors is prohibited.',
+      'Because our catalogue contains mature content. Confirming your age is required before using Ashqe. Sharing your account with minors is prohibited.',
     order: 7,
   },
   {
@@ -82,7 +82,7 @@ async function main() {
   const db = mongoose.connection.db!;
   console.log('db:', db.databaseName);
 
-  // Replace FAQ set with Tataiya 18+ copy
+  // Replace FAQ set with Ashqe 18+ copy
   await db.collection('faqs').deleteMany({});
   const docs = FAQS.map((f) => ({
     question: f.question,

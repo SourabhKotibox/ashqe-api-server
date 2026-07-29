@@ -3,21 +3,22 @@ import { logger } from './logger';
 
 let isMongoConnected = false;
 
-const DEFAULT_DB_NAME = 'tataiya';
+const DEFAULT_DB_NAME = 'ashqe';
 
 /**
  * Atlas URI without a path (e.g. ...mongodb.net/?appName=...) defaults to DB "test".
- * Ensure we always target the Tataiya application database.
+ * Ensure we always target the Ashqe application database.
  */
 export function ensureMongoDbName(uri: string, dbName = DEFAULT_DB_NAME): string {
   try {
     const parsed = new URL(uri);
     const path = parsed.pathname.replace(/^\//, '');
-    if (!path || path === 'test') {
+    // Force Ashqe DB even if an old Tataiya/test path is left in the URI.
+    if (!path || path === 'test' || path === 'tataiya') {
       parsed.pathname = `/${dbName}`;
       logger.warn(
         { from: path || '(empty)', to: dbName },
-        'MONGODB_URI had no/app default DB name — forcing application database'
+        'MONGODB_URI DB name normalized to application database'
       );
       return parsed.toString();
     }
@@ -54,9 +55,10 @@ export async function connectMongoDB(): Promise<boolean> {
     isMongoConnected = true;
     logger.info({ dbName: mongoose.connection.name }, 'MongoDB Atlas connected');
 
-    if (mongoose.connection.name === 'test') {
+    if (mongoose.connection.name === 'test' || mongoose.connection.name === 'tataiya') {
       logger.error(
-        'Connected to MongoDB database "test" — set MONGODB_URI path to /tataiya and restart'
+        { dbName: mongoose.connection.name },
+        'Connected to unexpected MongoDB database — set MONGODB_URI path to /ashqe and restart'
       );
     }
 

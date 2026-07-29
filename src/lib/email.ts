@@ -14,9 +14,9 @@ const replaceVariables = (template: string, variables: Record<string, string>): 
 const getPlatformName = async (): Promise<string> => {
   try {
     const settings = await SettingsModel.findOne().lean();
-    return (settings as any)?.platformName || process.env.PLATFORM_NAME || 'Triple Minds';
+    return (settings as any)?.platformName || process.env.PLATFORM_NAME || 'Ashqe';
   } catch {
-    return process.env.PLATFORM_NAME || 'Triple Minds';
+    return process.env.PLATFORM_NAME || 'Ashqe';
   }
 };
 

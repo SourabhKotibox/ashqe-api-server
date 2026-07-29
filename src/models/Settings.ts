@@ -138,23 +138,23 @@ export interface ISettings extends Document {
 const SettingsSchema = new Schema<ISettings>(
   {
     // Business
-    platformName: { type: String, default: 'Triple Minds' },
+    platformName: { type: String, default: 'Ashqe' },
     contactNo: { type: String, default: '' },
     inquiryEmail: { type: String, default: '' },
     siteDescription: { type: String, default: '' },
-    copyrightText: { type: String, default: '© 2026 Triple Minds. All Rights Reserved.' },
+    copyrightText: { type: String, default: '© 2026 Ashqe. All Rights Reserved.' },
     facebookUrl: { type: String, default: '' },
     twitterUrl: { type: String, default: '' },
     instagramUrl: { type: String, default: '' },
     youtubeUrl: { type: String, default: '' },
     // Branding
-    logoUrl: { type: String, default: 'https://i.imgur.com/45cG5Kc.png' },
-    darkLogoUrl: { type: String, default: 'https://i.imgur.com/45cG5Kc.png' },
-    lightLogoUrl: { type: String, default: 'https://i.imgur.com/45cG5Kc.png' },
-    faviconUrl: { type: String, default: '' },
+    logoUrl: { type: String, default: '/logo.png' },
+    darkLogoUrl: { type: String, default: '/logo.png' },
+    lightLogoUrl: { type: String, default: '/logo.png' },
+    faviconUrl: { type: String, default: '/favicon.png' },
     logoStyle: { type: String, enum: ['icon', 'fill'], default: 'fill' },
     loginTitle: { type: String, default: 'Welcome Back' },
-    loginSubtitle: { type: String, default: 'Admin Console' },
+    loginSubtitle: { type: String, default: 'Ashqe Admin Console' },
     loginButtonText: { type: String, default: 'Sign In' },
     // Mail
     mailEmail: { type: String, default: '' },
@@ -164,8 +164,8 @@ const SettingsSchema = new Schema<ISettings>(
     mailEncryption: { type: String, default: 'tls' },
     mailUsername: { type: String, default: '' },
     mailPassword: { type: String, default: '' },
-    mailFrom: { type: String, default: 'info@tripleminds.com' },
-    mailFromName: { type: String, default: 'Triple Minds' },
+    mailFrom: { type: String, default: 'info@ashqe.app' },
+    mailFromName: { type: String, default: 'Ashqe' },
     // Storage — default S3; switch to local anytime in admin settings
     storageDriver: { type: String, enum: ['local', 's3'], default: 's3' },
     awsAccessKeyId: { type: String, default: '' },
@@ -178,8 +178,8 @@ const SettingsSchema = new Schema<ISettings>(
     bunnyAccessKey: { type: String, default: '' },
     bunnyCdnUrl: { type: String, default: '' },
     // Customization
-    primaryColor: { type: String, default: '#e50914' },
-    colorTheme: { type: String, default: 'blue-green' },
+    primaryColor: { type: String, default: '#FF8C38' },
+    colorTheme: { type: String, default: 'orange' },
     navbarStyle: { type: String, enum: ['glass', 'sticky', 'transparent', 'default'], default: 'default' },
     navbarHide: { type: Boolean, default: false },
     cardStyle: { type: String, enum: ['default', 'glass', 'transparent'], default: 'default' },

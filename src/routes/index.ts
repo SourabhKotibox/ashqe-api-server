@@ -163,9 +163,9 @@ const router: FastifyPluginAsync = async (fastify) => {
           {
             type: 'announcement',
             isHighlight: true,
-            title: 'Welcome to Tataiya',
+            title: 'Welcome to Ashqe',
             text: 'Stream premium 18+ movies anytime. Subscribe for full access and downloads.',
-            userName: 'Tataiya',
+            userName: 'Ashqe',
             userEmail: 'system@ashqe.app',
           },
           {
@@ -173,7 +173,7 @@ const router: FastifyPluginAsync = async (fastify) => {
             isHighlight: true,
             title: 'Standard plan — ₹30/month',
             text: 'Unlock HD streaming and offline downloads with our Standard plan.',
-            userName: 'Tataiya',
+            userName: 'Ashqe',
             userEmail: 'system@ashqe.app',
           },
         ];

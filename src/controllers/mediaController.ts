@@ -455,7 +455,7 @@ export const getMediaFileById = async (request: FastifyRequest, reply: FastifyRe
           durationFormatted,
           ageRating: 18,
           slug,
-          metaTitle: title ? `${title} | Tataiya` : undefined,
+          metaTitle: title ? `${title} | Ashqe` : undefined,
           posterFrameUrl: (file as any).posterFrameUrl,
           width: (file as any).width,
           height: (file as any).height,
