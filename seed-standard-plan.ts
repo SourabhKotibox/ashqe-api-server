@@ -41,7 +41,7 @@ async function main() {
   });
 
   // Fix banner image URLs that are bare S3 keys
-  const s3Base = 'https://tatiyatv.s3.eu-north-1.amazonaws.com/';
+  const s3Base = 'https://ashqe-bucket-v1.s3.ap-south-1.amazonaws.com/';
   const banners = await db.collection('banners').find({}).toArray();
   let fixedBanners = 0;
   for (const b of banners) {

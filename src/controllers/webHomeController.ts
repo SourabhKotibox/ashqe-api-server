@@ -5,7 +5,7 @@ import { BannerModel } from '../models/Banner';
 import { logger } from '../lib/logger';
 
 const S3_PUBLIC_BASE =
-  (process.env.AWS_S3_PUBLIC_BASE_URL || 'https://tatiyatv.s3.eu-north-1.amazonaws.com').replace(/\/$/, '');
+  (process.env.AWS_S3_PUBLIC_BASE_URL || 'https://ashqe-bucket-v1.s3.ap-south-1.amazonaws.com').replace(/\/$/, '');
 
 /** Turn relative media keys / legacy /uploads paths into absolute public URLs */
 const resolveMediaUrl = (value?: string | null): string => {
