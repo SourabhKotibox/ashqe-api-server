@@ -1,24 +1,32 @@
 import 'dotenv/config';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
+import { ensureMongoDbName } from './src/lib/mongodb';
 
-const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/triple-mindes';
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@ashqe.app';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Ashqe@Admin2026';
+const ADMIN_NAME = process.env.ADMIN_NAME || 'Ashqe Super Admin';
 
 async function createAdmin() {
-  await mongoose.connect(uri);
-  const email = 'admin@tataiya.com';
-  const password = 'Tataiya@Admin2026';
-  const passwordHash = await bcrypt.hash(password, 12);
+  const rawUri = process.env.MONGODB_URI;
+  if (!rawUri) {
+    throw new Error('MONGODB_URI is not set');
+  }
 
+  const uri = ensureMongoDbName(rawUri);
+  await mongoose.connect(uri);
+  console.log('Connected to DB:', mongoose.connection.name);
+
+  const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 12);
   const db = mongoose.connection.db;
   if (!db) throw new Error('DB not connected');
 
   await db.collection('adminusers').updateOne(
-    { role: 'superadmin' },
+    { email: ADMIN_EMAIL.toLowerCase() },
     {
       $set: {
-        email,
-        name: 'Tataiya Super Admin',
+        email: ADMIN_EMAIL.toLowerCase(),
+        name: ADMIN_NAME,
         passwordHash,
         role: 'superadmin',
         isActive: true,
@@ -51,32 +59,38 @@ async function createAdmin() {
     { upsert: true }
   );
 
-  // Brand settings
   await db.collection('settings').updateOne(
     {},
     {
       $set: {
-        platformName: 'Tataiya',
+        platformName: 'Ashqe',
         logoUrl: '/logo.png',
         darkLogoUrl: '/logo.png',
         lightLogoUrl: '/logo.png',
-        primaryColor: '#FFB800',
-        copyrightText: '© 2026 Tataiya. All Rights Reserved.',
-        siteDescription: 'Stream premium movies on Tataiya — honey-sweet entertainment.',
+        faviconUrl: '/favicon.png',
+        primaryColor: '#FF8C38',
+        colorTheme: 'orange',
+        copyrightText: '© 2026 Ashqe. All Rights Reserved.',
+        siteDescription: 'Ashqe — stream premium movies and series.',
         loginTitle: 'Welcome Back',
-        loginSubtitle: 'Tataiya Admin Console',
+        loginSubtitle: 'Ashqe Admin Console',
         loginButtonText: 'Sign In',
-        storageDriver: 's3',
+        mailFrom: 'info@ashqe.app',
+        mailFromName: 'Ashqe',
+        metaTitle: 'Ashqe',
+        metaDescription: 'Ashqe streaming platform',
+        canonicalUrl: 'https://ashqe.app',
       },
       $setOnInsert: { createdAt: new Date() },
     },
     { upsert: true }
   );
 
-  console.log('Admin ready');
-  console.log('Email:', email);
-  console.log('Password:', password);
+  console.log('Ashqe admin ready');
+  console.log('Email:', ADMIN_EMAIL.toLowerCase());
+  console.log('Password:', ADMIN_PASSWORD);
   console.log('Admin login path: /admin/login');
+  await mongoose.disconnect();
   process.exit(0);
 }
 

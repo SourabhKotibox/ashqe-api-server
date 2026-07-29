@@ -10,7 +10,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "seed": "tsx src/seed-run.ts",
     "seed:pages": "tsx seed-pages.ts",
-    "seed:faqs": "tsx seed-faqs.ts"
+    "seed:faqs": "tsx seed-faqs.ts",
+    "seed:admin": "tsx create-admin.ts",
+    "seed:branding": "tsx scripts/reset-ashqe-branding.ts"
   },
   "dependencies": {
     "@aws-sdk/client-mediaconvert": "^3.1095.0",

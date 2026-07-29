@@ -146,33 +146,26 @@ async function seedLanguages() {
 }
 
 async function seedAdminUsers() {
-  const count = await AdminUserModel.countDocuments();
-  if (count > 0) return;
+  const email = (process.env.ADMIN_EMAIL || 'admin@ashqe.app').toLowerCase();
+  const password = process.env.ADMIN_PASSWORD || 'Ashqe@Admin2026';
+  const name = process.env.ADMIN_NAME || 'Ashqe Super Admin';
+  const passwordHash = await bcrypt.hash(password, 12);
 
-  const [hash1, hash2] = await Promise.all([
-    bcrypt.hash('admin123', 12),
-    bcrypt.hash('editor123', 12),
-  ]);
-
-  const admins = [
+  await AdminUserModel.findOneAndUpdate(
+    { email },
     {
-      email: 'admin@streamit.com',
-      name: 'Admin User',
-      passwordHash: hash1,
-      role: 'superadmin' as const,
-      isActive: true,
+      $set: {
+        email,
+        name,
+        passwordHash,
+        role: 'superadmin' as const,
+        isActive: true,
+      },
     },
-    {
-      email: 'editor@streamvault.com',
-      name: 'Content Editor',
-      passwordHash: hash2,
-      role: 'moderator' as const,
-      isActive: true,
-    },
-  ];
+    { upsert: true, new: true }
+  );
 
-  await AdminUserModel.insertMany(admins);
-  logger.info('Seeded admin users');
+  logger.info({ email }, 'Seeded/updated Ashqe superadmin');
 }
 
 async function seedGenres() {
