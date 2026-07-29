@@ -161,7 +161,7 @@ export const getAppProfile = async (request: FastifyRequest, reply: FastifyReply
         // Calculate user sequential number and dynamically format Display ID
         const userNumber = await UserModel.countDocuments({ _id: { $lte: user._id } });
         const settings = await SettingsModel.findOne().lean();
-        const appName = settings?.platformName || 'XOTO';
+        const appName = settings?.platformName || 'Ashqe';
         const prefix = appName.substring(0, 4).toUpperCase();
         const displayId = `${prefix}${String(userNumber).padStart(4, '0')}`;
 
@@ -414,7 +414,7 @@ export const getAppProfile = async (request: FastifyRequest, reply: FastifyReply
     const appSettings = {
       shareAppTitle: 'Share the App',
       shareAppText,
-      shareAppUrl: 'https://play.google.com/store/apps/details?id=com.xoto.ott',
+      shareAppUrl: 'https://play.google.com/store/apps/details?id=com.ashqe.ott',
       privacyPolicy: privacyPage?.content || '',
       termsOfService: termsPage?.content || '',
       deleteAccountTitle: 'Delete Account',
