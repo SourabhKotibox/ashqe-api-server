@@ -47,7 +47,7 @@ async function main() {
     const lang = languages[i];
     await db.collection('languages').updateOne(
       { code: lang.code },
-      { $setOnInsert: { ...lang, order: i + 1, createdAt: new Date() } },
+      { $setOnInsert: { ...lang, isActive: true, order: i + 1, createdAt: new Date(), updatedAt: new Date() } },
       { upsert: true }
     );
   }
