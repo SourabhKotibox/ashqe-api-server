@@ -125,6 +125,12 @@ export const sendOtp = async (request: FastifyRequest, reply: FastifyReply) => {
     if (!result.success) {
       return reply.status(400).send(result);
     }
+    if (!result.verificationId) {
+      return reply.status(500).send({
+        success: false,
+        message: 'OTP provider returned no verificationId — check Message Gateway settings',
+      });
+    }
 
     return reply.status(200).send({
       success: true,

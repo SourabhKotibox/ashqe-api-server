@@ -30,10 +30,8 @@ const STATIC_VERIFICATION_ID = 'static-otp-verification';
 const DEFAULT_BASE = 'https://cpaas.messagecentral.com';
 const MC_TIMEOUT_MS = 12_000;
 
-/** Static 1234 only when explicitly allowed (local/dev). Never on production by default. */
-const allowStaticOtp = () =>
-  process.env.ALLOW_STATIC_OTP === 'true' ||
-  process.env.NODE_ENV === 'development';
+/** Static 1234 ONLY when ALLOW_STATIC_OTP=true. Never auto-enable via NODE_ENV. */
+const allowStaticOtp = () => process.env.ALLOW_STATIC_OTP === 'true';
 
 async function fetchJson(
   url: string,
@@ -160,7 +158,7 @@ export class MessageCentralService {
 
     if (!this.useLive(cfg)) {
       if (allowStaticOtp()) {
-        logger.warn('Message Central not live — static OTP 1234 (ALLOW_STATIC_OTP / development)');
+        logger.warn('Message Central not live — static OTP 1234 (ALLOW_STATIC_OTP=true)');
         return {
           success: true,
           verificationId: STATIC_VERIFICATION_ID,
@@ -172,9 +170,10 @@ export class MessageCentralService {
           enabled: cfg.enabled,
           hasCustomerId: !!cfg.customerId,
           hasAuthToken: !!cfg.authToken,
+          authTokenLen: cfg.authToken?.length || 0,
           hasPassword: !!cfg.password,
         },
-        'Message Central OTP blocked — not configured'
+        'Message Central OTP blocked — not configured (website would get no SMS)'
       );
       return { success: false, message: this.missingKeysMessage() };
     }
