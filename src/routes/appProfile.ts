@@ -7,6 +7,8 @@ const appProfileRoutes: FastifyPluginAsync = async (fastify) => {
 
   // PATCH /api/app/profile — update name / email / avatar URL
   fastify.patch('/profile', updateAppProfile);
+  // Some proxies/clients only allow PUT
+  fastify.put('/profile', updateAppProfile);
 
   // POST /api/app/profile/avatar — multipart avatar upload
   fastify.post('/profile/avatar', uploadAppAvatar);
