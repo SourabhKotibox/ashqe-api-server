@@ -15,6 +15,13 @@ import { normalizePlanKey } from './subscriptionController';
 
 const messageCentralService = messageCentral;
 
+/** Normalize any Indian/intl phone input to 10 digits */
+function normalizePhone(input: string): string {
+  const digits = String(input || '').replace(/\D/g, '');
+  if (digits.length >= 10) return digits.slice(-10);
+  return digits;
+}
+
 /** Prefer live Subscription rows so admin-created plans show on login immediately */
 async function resolveSubscriptionPayload(user: any) {
   const userId = user._id;
@@ -70,13 +77,14 @@ async function resolveSubscriptionPayload(user: any) {
 
 // Validation schemas
 const sendOtpSchema = z.object({
-  mobileNumber: z.string().regex(/^\d{10}$/, 'Mobile number must be 10 digits'),
+  mobileNumber: z.string().min(8, 'Mobile number required'),
 });
 
 const verifyOtpSchema = z.object({
-  mobileNumber: z.string().regex(/^\d{10}$/, 'Mobile number must be 10 digits'),
+  mobileNumber: z.string().min(8, 'Mobile number required'),
   verificationId: z.string().optional(),
   otp: z.string().regex(/^\d{4,8}$/, 'OTP must be 4–8 digits'),
+  name: z.string().trim().min(1).max(80).optional(),
   deviceId: z.string().optional(),
   deviceName: z.string().optional(),
 });
@@ -87,6 +95,15 @@ const setLanguageSchema = z.object({
 
 export const sendOtp = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
+    const siteSettings = await SettingsModel.findOne().lean();
+    if (siteSettings?.maintenanceMode) {
+      return reply.status(503).send({
+        success: false,
+        message: 'The platform is currently under maintenance. Please try again later.',
+        maintenance: true,
+      });
+    }
+
     const body = sendOtpSchema.safeParse(request.body);
     if (!body.success) {
       return reply.status(400).send({
@@ -95,14 +112,26 @@ export const sendOtp = async (request: FastifyRequest, reply: FastifyReply) => {
         errors: body.error.flatten().fieldErrors,
       });
     }
-    const { mobileNumber } = body.data;
+
+    const mobileNumber = normalizePhone(body.data.mobileNumber);
+    if (mobileNumber.length !== 10) {
+      return reply.status(400).send({
+        success: false,
+        message: 'Enter a valid 10-digit mobile number',
+      });
+    }
 
     const result = await messageCentralService.sendOtp(mobileNumber);
     if (!result.success) {
       return reply.status(400).send(result);
     }
 
-    return reply.status(200).send(result);
+    return reply.status(200).send({
+      success: true,
+      verificationId: result.verificationId,
+      message: result.message || 'OTP sent successfully',
+      mobileNumber,
+    });
   } catch (error) {
     console.error('Error sending OTP:', error);
     return reply.status(500).send({ 
@@ -115,6 +144,15 @@ export const sendOtp = async (request: FastifyRequest, reply: FastifyReply) => {
 
 export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
+    const siteSettings = await SettingsModel.findOne().lean();
+    if (siteSettings?.maintenanceMode) {
+      return reply.status(503).send({
+        success: false,
+        message: 'The platform is currently under maintenance. Please try again later.',
+        maintenance: true,
+      });
+    }
+
     const body = verifyOtpSchema.safeParse(request.body);
     if (!body.success) {
       return reply.status(400).send({
@@ -123,7 +161,15 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
         errors: body.error.flatten().fieldErrors,
       });
     }
-    const { mobileNumber, verificationId, otp, deviceId, deviceName } = body.data;
+    const { verificationId, otp, deviceId, deviceName, name: providedName } = body.data;
+    const mobileNumber = normalizePhone(body.data.mobileNumber);
+
+    if (mobileNumber.length !== 10) {
+      return reply.status(400).send({
+        success: false,
+        message: 'Enter a valid 10-digit mobile number',
+      });
+    }
 
     const verifyResult = await messageCentralService.verifyOtp(verificationId, otp);
     if (!verifyResult.success) {
@@ -133,19 +179,25 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
       });
     }
 
-    // ── Find ALL accounts with this phone number ──────────────────────────────
-    // A user may have a real web account (email+phone) AND a temp OTP account
-    // (phone + temp email like 8306690426@temp.local). We must prefer the real one.
-    const allUsersWithPhone = await UserModel.find({ phone: mobileNumber }).lean();
+    // Match phone stored as 10 digits or with country prefix
+    const phoneQuery = {
+      $or: [
+        { phone: mobileNumber },
+        { phone: `91${mobileNumber}` },
+        { phone: `+91${mobileNumber}` },
+      ],
+    };
+
+    const allUsersWithPhone = await UserModel.find(phoneQuery).lean();
 
     let user: any = null;
+    const displayName = (providedName || '').trim() || 'User';
 
     if (allUsersWithPhone.length === 0) {
-      // Brand new user — create temp account
-      const newProfile = { name: 'User', isKids: false, maturityLevel: 18, language: 'Hindi' };
+      const newProfile = { name: displayName, isKids: false, maturityLevel: 18, language: 'Hindi' };
       const newUser = new UserModel({
         phone: mobileNumber,
-        name: 'User',
+        name: displayName,
         email: `${mobileNumber}@temp.local`,
         profiles: [newProfile],
         preferredLanguage: 'Hindi',
@@ -154,10 +206,8 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
       await newUser.save();
       user = newUser;
     } else if (allUsersWithPhone.length === 1) {
-      // Single account — use it directly
       user = allUsersWithPhone[0];
     } else {
-      // Multiple accounts — prefer the one with a real (non-temp) email
       const realAccount = allUsersWithPhone.find(
         (u) => u.email && !u.email.endsWith('@temp.local')
       );
@@ -167,14 +217,12 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
 
       user = realAccount || allUsersWithPhone[0];
 
-      // Clean up orphan temp account to prevent future confusion
       if (realAccount && tempAccount) {
         console.log(`[verifyOtp] Merging temp account ${tempAccount._id} into real account ${realAccount._id} for phone ${mobileNumber}`);
         await UserModel.findByIdAndDelete(tempAccount._id);
       }
     }
 
-    // Re-fetch as a full mongoose doc so we can .save()
     const userDoc = await UserModel.findById(user._id);
     if (!userDoc) {
       return reply.status(404).send({ success: false, message: 'User not found' });
@@ -187,10 +235,20 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
       });
     }
 
+    // Normalize stored phone to 10 digits
+    (userDoc as any).phone = mobileNumber;
+
+    // Optional name update for new/temp accounts
+    if (providedName && (userDoc.name === 'User' || !(userDoc as any).email || String((userDoc as any).email).endsWith('@temp.local'))) {
+      userDoc.name = displayName;
+      if (userDoc.profiles?.length) {
+        userDoc.profiles[0].name = displayName;
+      }
+    }
+
     // ── Manage Device Limits ──────────────────────────────────────────────────
     if (deviceId) {
-      // Find plan limits
-      let deviceLimitCount = 1; // Default
+      let deviceLimitCount = 1;
       const planName = userDoc.subscriptionPlan || 'free';
       const isActive = userDoc.subscriptionStatus === 'active' && 
                        (!userDoc.subscriptionExpiry || userDoc.subscriptionExpiry > new Date());
@@ -209,11 +267,9 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
       const existingDeviceIndex = devices.findIndex((d: any) => d.deviceId === deviceId);
 
       if (existingDeviceIndex !== -1) {
-        // Device already exists, just update timestamp
         devices[existingDeviceIndex].lastActive = new Date();
         devices[existingDeviceIndex].deviceName = deviceName || devices[existingDeviceIndex].deviceName;
       } else {
-        // New device
         const newDevice = {
           deviceId,
           deviceName: deviceName || 'Unknown Device',
@@ -222,11 +278,9 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
           addedAt: new Date()
         };
         
-        // Enforce limit by removing oldest if necessary
         while (devices.length >= deviceLimitCount) {
-          // Sort by oldest lastActive
           devices.sort((a: any, b: any) => new Date(a.lastActive).getTime() - new Date(b.lastActive).getTime());
-          devices.shift(); // Remove oldest
+          devices.shift();
         }
         devices.push(newDevice);
       }
@@ -249,7 +303,8 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
       expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '7d',
     });
 
-    // Return full profile so the app can pre-fill name, email, avatar, subscription
+    const sub = await resolveSubscriptionPayload(userDoc);
+
     return reply.status(200).send({
       success: true,
       accessToken,
@@ -260,10 +315,11 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
         : null,
       phone: (userDoc as any).phone || null,
       avatar: (userDoc as any).avatar || null,
-      subscriptionPlan: userDoc.subscriptionPlan || 'free',
-      subscriptionStatus: userDoc.subscriptionStatus || 'inactive',
-      subscriptionExpiry: (userDoc as any).subscriptionExpiry || null,
-      expiresIn: 604800, // 7 days in seconds
+      ...sub,
+      walletBalance: (userDoc as any).walletBalance || 0,
+      profileLimitCount: (userDoc as any).profileLimitCount || 1,
+      isNewUser: allUsersWithPhone.length === 0,
+      expiresIn: 604800,
     });
   } catch (error) {
     console.error('Error verifying OTP:', error);
@@ -434,7 +490,12 @@ export const loginUser = async (request: FastifyRequest, reply: FastifyReply) =>
 
     // Determine if input is a phone number (no '@') or email
     const isPhone = !emailOrPhone.includes('@');
-    const user = await UserModel.findOne(isPhone ? { phone: emailOrPhone } : { email: emailOrPhone });
+    const phoneNorm = isPhone ? emailOrPhone.replace(/\D/g, '').slice(-10) : '';
+    const user = await UserModel.findOne(
+      isPhone
+        ? { $or: [{ phone: phoneNorm }, { phone: emailOrPhone }, { phone: `91${phoneNorm}` }] }
+        : { email: emailOrPhone }
+    );
 
     if (!user) return reply.status(401).send({ success: false, message: 'No account found. Please register first.' });
     

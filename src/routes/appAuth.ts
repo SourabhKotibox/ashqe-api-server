@@ -14,6 +14,9 @@ import {
 const appAuthRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/app/auth/send-otp', sendOtp);
   fastify.post('/app/auth/verify-otp', verifyOtp);
+  // Aliases some mobile builds use
+  fastify.post('/auth/send-otp', sendOtp);
+  fastify.post('/auth/verify-otp', verifyOtp);
   fastify.post('/app/auth/register', registerUser);
   fastify.post('/app/auth/login', loginUser);
   fastify.post('/app/auth/google', googleAuth);
