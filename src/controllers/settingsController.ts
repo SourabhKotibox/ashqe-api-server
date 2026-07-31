@@ -19,9 +19,12 @@ export const getSettings = async (request: FastifyRequest, reply: FastifyReply) 
     let isAdmin = false;
     try {
       await request.jwtVerify();
-      const decodedUser = request.user as { id?: string; _id?: string; role: string };
+      const decodedUser = request.user as { id?: string; _id?: string; role?: string };
       const adminId = decodedUser?.id || decodedUser?._id;
-      if (adminId) {
+      // Trust admin/superadmin role on JWT (same token used for PUT)
+      if (decodedUser?.role === 'superadmin' || decodedUser?.role === 'admin') {
+        isAdmin = true;
+      } else if (adminId) {
         const { checkUserPermission } = await import('../middlewares/rbac');
         const permResult = await checkUserPermission(String(adminId), 'settings', 'canView');
         if (permResult.allowed) {
