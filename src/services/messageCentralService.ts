@@ -2,11 +2,15 @@
  * Message Central VerifyNow OTP
  * Config priority: Settings DB → env vars
  * APIs:
- *   GET  {base}/auth/v1/authentication/token   (only if no Auth Token)
+ *   GET  {base}/auth/v1/authentication/token
  *   POST {base}/verification/v3/send
  *   GET  {base}/verification/v3/validateOtp
+ *
+ * Note: Console Auth Tokens expire (~24h). Prefer saving MC email+password
+ * so we can mint a fresh token automatically.
  */
 import { SettingsModel } from '../models/Settings';
+import { logger } from '../lib/logger';
 
 export type SendOtpResult = {
   success: boolean;
@@ -34,7 +38,7 @@ type McConfig = {
 const STATIC_OTP = '1234';
 const STATIC_VERIFICATION_ID = 'static-otp-verification';
 const DEFAULT_BASE = 'https://cpaas.messagecentral.com';
-const TIMEOUT_MS = 12_000;
+const TIMEOUT_MS = 15_000;
 
 const allowStaticOtp = () =>
   process.env.ALLOW_STATIC_OTP === 'true' ||
@@ -46,7 +50,7 @@ function pick(settingsVal: unknown, envVal: string | undefined, fallback = ''): 
   return String(envVal ?? fallback).trim();
 }
 
-async function loadConfig(): Promise<McConfig> {
+export async function loadMcConfig(): Promise<McConfig> {
   const settings = await SettingsModel.findOne().lean<any>().catch(() => null);
 
   const otpLen = Number(
@@ -71,12 +75,26 @@ async function loadConfig(): Promise<McConfig> {
   };
 }
 
+function configGapMessage(cfg: McConfig): string {
+  const missing: string[] = [];
+  if (!cfg.enabled) missing.push('Enable toggle is OFF');
+  if (!cfg.customerId) missing.push('Customer ID');
+  if (!cfg.authToken && !cfg.password) missing.push('Auth Token or Password');
+  return `SMS OTP not ready: ${missing.join(', ') || 'incomplete config'}. Admin → Settings → SMS / OTP`;
+}
+
 async function fetchJson(url: string, init: RequestInit = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
     const res = await fetch(url, { ...init, signal: controller.signal });
-    const data: any = await res.json().catch(() => ({}));
+    const text = await res.text();
+    let data: any = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { raw: text?.slice(0, 300) };
+    }
     return { res, data };
   } catch (err: any) {
     if (err?.name === 'AbortError') {
@@ -88,25 +106,55 @@ async function fetchJson(url: string, init: RequestInit = {}) {
   }
 }
 
+function extractToken(data: any): string {
+  return String(
+    data?.token ||
+      data?.authToken ||
+      data?.data?.token ||
+      data?.data?.authToken ||
+      ''
+  ).trim();
+}
+
+function extractVerificationId(data: any): string {
+  return String(
+    data?.data?.verificationId ||
+      data?.verificationId ||
+      data?.data?.verification_id ||
+      data?.data?.verificationID ||
+      ''
+  ).trim();
+}
+
+function mcErrorMessage(data: any, res: { status: number }, fallback: string): string {
+  return (
+    data?.message ||
+    data?.errorMessage ||
+    data?.data?.message ||
+    data?.error ||
+    (data?.responseCode != null ? `MC error code ${data.responseCode}` : '') ||
+    `${fallback} (HTTP ${res.status})`
+  );
+}
+
 export class MessageCentralService {
   private cachedToken: string | null = null;
   private tokenExpiresAt = 0;
 
+  /** Live when enabled + customerId + (token or password). */
   private useLive(cfg: McConfig) {
-    const hasKeys = !!cfg.customerId && (!!cfg.authToken || !!cfg.password);
-    return hasKeys && (cfg.enabled || !!cfg.authToken);
+    return (
+      cfg.enabled &&
+      !!cfg.customerId &&
+      (!!cfg.authToken || !!cfg.password)
+    );
   }
 
-  private async getAuthToken(cfg: McConfig): Promise<string> {
-    if (cfg.authToken) return cfg.authToken;
-
-    if (this.cachedToken && Date.now() < this.tokenExpiresAt) {
-      return this.cachedToken;
-    }
+  /** Mint a fresh JWT via email+password (preferred — console tokens expire). */
+  private async fetchPasswordToken(cfg: McConfig): Promise<string> {
     if (!cfg.password) {
-      throw new Error('MC Auth Token or Password is required (Settings → SMS / OTP)');
+      throw new Error('MC Password is required to refresh Auth Token');
     }
-
     const key = Buffer.from(cfg.password, 'utf8').toString('base64');
     const params = new URLSearchParams({
       customerId: cfg.customerId,
@@ -119,27 +167,37 @@ export class MessageCentralService {
     const { res, data } = await fetchJson(
       `${cfg.baseUrl}/auth/v1/authentication/token?${params}`
     );
-
-    const token =
-      data?.token ||
-      data?.authToken ||
-      data?.data?.token ||
-      data?.data?.authToken ||
-      '';
-
+    const token = extractToken(data);
     if (!token) {
-      throw new Error(
-        data?.message || data?.errorMessage || `Token failed (HTTP ${res.status})`
-      );
+      throw new Error(mcErrorMessage(data, res, 'Auth token generation failed'));
+    }
+    this.cachedToken = token;
+    this.tokenExpiresAt = Date.now() + 50 * 60 * 1000;
+    return token;
+  }
+
+  private async getAuthToken(cfg: McConfig, forceRefresh = false): Promise<string> {
+    // Prefer password-minted token when available (console JWT expires in ~24h)
+    if (cfg.password) {
+      if (!forceRefresh && this.cachedToken && Date.now() < this.tokenExpiresAt) {
+        return this.cachedToken;
+      }
+      return this.fetchPasswordToken(cfg);
     }
 
-    this.cachedToken = String(token);
-    this.tokenExpiresAt = Date.now() + 50 * 60 * 1000;
-    return this.cachedToken;
+    if (cfg.authToken && !forceRefresh) return cfg.authToken;
+    if (cfg.authToken) return cfg.authToken;
+
+    throw new Error('MC Auth Token or Password is required (Settings → SMS / OTP)');
+  }
+
+  private isUnauthorized(res: { status: number }, data: any) {
+    const code = Number(data?.responseCode ?? data?.status ?? res.status);
+    return res.status === 401 || res.status === 403 || code === 401 || code === 403;
   }
 
   async sendOtp(mobileNumber: string): Promise<SendOtpResult> {
-    const cfg = await loadConfig();
+    const cfg = await loadMcConfig();
     const phone = String(mobileNumber || '').replace(/\D/g, '').slice(-10);
 
     if (phone.length !== 10) {
@@ -154,11 +212,8 @@ export class MessageCentralService {
           message: `Use ${STATIC_OTP} (dev fallback)`,
         };
       }
-      return {
-        success: false,
-        message:
-          'SMS OTP not configured. Set Message Central in Admin → Settings → SMS / OTP.',
-      };
+      logger.warn({ cfg: { enabled: cfg.enabled, hasCustomerId: !!cfg.customerId, hasToken: !!cfg.authToken, hasPassword: !!cfg.password } }, 'MC OTP not configured');
+      return { success: false, message: configGapMessage(cfg) };
     }
 
     try {
@@ -174,42 +229,38 @@ export class MessageCentralService {
       const doSend = (authToken: string) =>
         fetchJson(`${cfg.baseUrl}/verification/v3/send?${params}`, {
           method: 'POST',
-          headers: { authToken, Accept: 'application/json' },
+          headers: {
+            authToken,
+            Accept: 'application/json',
+          },
         });
 
       let { res, data } = await doSend(token);
 
-      if (
-        !cfg.authToken &&
-        (res.status === 401 || Number(data?.responseCode) === 401)
-      ) {
+      // Expired console token → refresh via password if possible
+      if (this.isUnauthorized(res, data) && cfg.password) {
         this.cachedToken = null;
-        token = await this.getAuthToken(cfg);
+        token = await this.getAuthToken(cfg, true);
         ({ res, data } = await doSend(token));
       }
 
-      const verificationId =
-        data?.data?.verificationId ||
-        data?.verificationId ||
-        data?.data?.verification_id ||
-        '';
+      const verificationId = extractVerificationId(data);
 
       if (!verificationId) {
+        logger.error({ status: res.status, data }, 'MC send OTP failed');
         return {
           success: false,
-          message:
-            data?.message ||
-            data?.errorMessage ||
-            `Failed to send OTP (HTTP ${res.status})`,
+          message: mcErrorMessage(data, res, 'Failed to send OTP'),
         };
       }
 
       return {
         success: true,
-        verificationId: String(verificationId),
+        verificationId,
         message: 'OTP sent successfully',
       };
     } catch (err: any) {
+      logger.error({ err }, 'MC send OTP exception');
       return { success: false, message: err?.message || 'Failed to send OTP' };
     }
   }
@@ -218,25 +269,16 @@ export class MessageCentralService {
     verificationId: string | undefined,
     code: string
   ): Promise<VerifyOtpResult> {
-    const cfg = await loadConfig();
+    const cfg = await loadMcConfig();
     const otp = String(code || '').trim();
 
     if (!this.useLive(cfg)) {
-      if (allowStaticOtp() && verificationId === STATIC_VERIFICATION_ID) {
-        return otp === STATIC_OTP
-          ? { success: true, message: 'OTP verified successfully' }
-          : { success: false, message: `Invalid OTP. Use ${STATIC_OTP}` };
-      }
-      // Legacy: accept static OTP without verificationId in dev
       if (allowStaticOtp() && (!verificationId || verificationId === STATIC_VERIFICATION_ID)) {
         return otp === STATIC_OTP
           ? { success: true, message: 'OTP verified successfully' }
           : { success: false, message: `Invalid OTP. Use ${STATIC_OTP}` };
       }
-      return {
-        success: false,
-        message: 'SMS OTP not configured',
-      };
+      return { success: false, message: configGapMessage(cfg) };
     }
 
     if (verificationId === STATIC_VERIFICATION_ID) {
@@ -261,9 +303,9 @@ export class MessageCentralService {
         });
 
       let { res, data } = await doValidate(token);
-      if (!cfg.authToken && (res.status === 401 || Number(data?.responseCode) === 401)) {
+      if (this.isUnauthorized(res, data) && cfg.password) {
         this.cachedToken = null;
-        token = await this.getAuthToken(cfg);
+        token = await this.getAuthToken(cfg, true);
         ({ res, data } = await doValidate(token));
       }
 
@@ -287,14 +329,16 @@ export class MessageCentralService {
         (codeNum === 200 && !status);
 
       if (!ok) {
+        logger.error({ status: res.status, data }, 'MC validate OTP failed');
         return {
           success: false,
-          message: data?.message || data?.errorMessage || 'Invalid or expired OTP',
+          message: mcErrorMessage(data, res, 'Invalid or expired OTP'),
         };
       }
 
       return { success: true, message: 'OTP verified successfully' };
     } catch (err: any) {
+      logger.error({ err }, 'MC validate OTP exception');
       return { success: false, message: err?.message || 'OTP verification failed' };
     }
   }
