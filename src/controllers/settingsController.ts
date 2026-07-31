@@ -194,6 +194,117 @@ export const updateSettings = async (request: FastifyRequest, reply: FastifyRepl
   }
 };
 
+/** Dedicated SMS/OTP save — only Message Central fields, native Mongo write */
+export const updateSmsSettings = async (request: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const body = (request.body || {}) as Record<string, any>;
+    const db = SettingsModel.db.db;
+    if (!db) {
+      return reply.status(500).send({ success: false, error: 'Database not connected' });
+    }
+    const col = db.collection('settings');
+
+    const $set: Record<string, any> = {
+      updatedAt: new Date(),
+    };
+
+    if (body.mcEnabled !== undefined) {
+      $set.mcEnabled = body.mcEnabled === true || body.mcEnabled === 'true' || body.mcEnabled === 1;
+    }
+    if (body.mcCustomerId !== undefined) {
+      $set.mcCustomerId = String(body.mcCustomerId || '').trim();
+    }
+    if (body.mcAuthToken !== undefined && String(body.mcAuthToken).trim()) {
+      $set.mcAuthToken = String(body.mcAuthToken).replace(/\s+/g, '').trim();
+    }
+    if (body.mcPassword !== undefined && String(body.mcPassword).trim()) {
+      $set.mcPassword = String(body.mcPassword).trim();
+    }
+    if (body.mcEmail !== undefined) $set.mcEmail = String(body.mcEmail || '').trim();
+    if (body.mcBaseUrl !== undefined) {
+      $set.mcBaseUrl =
+        String(body.mcBaseUrl || '').trim().replace(/\/$/, '') ||
+        'https://cpaas.messagecentral.com';
+    }
+    if (body.mcCountryCode !== undefined) {
+      $set.mcCountryCode = String(body.mcCountryCode || '91').replace(/^\+/, '') || '91';
+    }
+    if (body.mcOtpLength !== undefined) {
+      $set.mcOtpLength = Math.min(8, Math.max(4, Number(body.mcOtpLength) || 4));
+    }
+    if (body.mcFlowType !== undefined) {
+      $set.mcFlowType = String(body.mcFlowType || 'SMS').toUpperCase();
+    }
+
+    console.log('[updateSmsSettings] writing keys:', Object.keys($set), {
+      hasToken: !!$set.mcAuthToken,
+      tokenLen: $set.mcAuthToken ? String($set.mcAuthToken).length : 0,
+      customerId: $set.mcCustomerId,
+      enabled: $set.mcEnabled,
+    });
+
+    const count = await col.countDocuments();
+    let writeResult;
+    if (count === 0) {
+      writeResult = await col.insertOne({ ...$set, createdAt: new Date() });
+      console.log('[updateSmsSettings] inserted', writeResult.insertedId);
+    } else {
+      writeResult = await col.updateMany({}, { $set });
+      console.log('[updateSmsSettings] updateMany', {
+        matched: writeResult.matchedCount,
+        modified: writeResult.modifiedCount,
+      });
+    }
+
+    const doc = await col.find({}).sort({ updatedAt: -1 }).limit(1).next();
+    if (!doc) {
+      return reply.status(500).send({ success: false, error: 'Settings document missing after write' });
+    }
+
+    // Sync env so OTP works even if Settings read fails later
+    const envUpdates: Record<string, string> = {};
+    if ($set.mcEnabled !== undefined) envUpdates.MC_ENABLED = $set.mcEnabled ? 'true' : 'false';
+    if ($set.mcCustomerId !== undefined) envUpdates.MC_CUSTOMER_ID = $set.mcCustomerId;
+    if ($set.mcAuthToken) envUpdates.MC_AUTH_TOKEN = $set.mcAuthToken;
+    if ($set.mcEmail !== undefined) envUpdates.MC_EMAIL = $set.mcEmail;
+    if ($set.mcPassword) envUpdates.MC_PASSWORD = $set.mcPassword;
+    if ($set.mcBaseUrl) envUpdates.MC_BASE_URL = $set.mcBaseUrl;
+    if ($set.mcCountryCode) envUpdates.MC_COUNTRY_CODE = $set.mcCountryCode;
+    if ($set.mcOtpLength !== undefined) envUpdates.MC_OTP_LENGTH = String($set.mcOtpLength);
+    if ($set.mcFlowType) envUpdates.MC_FLOW_TYPE = $set.mcFlowType;
+    if (Object.keys(envUpdates).length) updateEnvFile(envUpdates);
+
+    const mcAuthTokenSet = !!doc.mcAuthToken;
+    const mcPasswordSet = !!doc.mcPassword;
+
+    if ($set.mcAuthToken && !mcAuthTokenSet) {
+      return reply.status(500).send({
+        success: false,
+        error: 'Auth token write verification failed',
+        debug: { wroteKeys: Object.keys($set), docKeys: Object.keys(doc) },
+      });
+    }
+
+    return reply.send({
+      success: true,
+      data: {
+        mcEnabled: !!doc.mcEnabled,
+        mcCustomerId: doc.mcCustomerId || '',
+        mcEmail: doc.mcEmail || '',
+        mcBaseUrl: doc.mcBaseUrl || 'https://cpaas.messagecentral.com',
+        mcCountryCode: doc.mcCountryCode || '91',
+        mcOtpLength: doc.mcOtpLength || 4,
+        mcFlowType: doc.mcFlowType || 'SMS',
+        mcAuthTokenSet,
+        mcPasswordSet,
+      },
+    });
+  } catch (error: any) {
+    console.error('[updateSmsSettings]', error);
+    return reply.status(500).send({ success: false, error: error.message });
+  }
+};
+
 // File field name -> Settings model field name
 const LOGO_FIELD_MAP: Record<string, string> = {
   logo: 'logoUrl',
