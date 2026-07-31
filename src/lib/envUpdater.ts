@@ -15,7 +15,20 @@ export function updateEnvFile(updates: Record<string, string>): void {
     const lines = content.split('\n');
 
     for (const [key, value] of Object.entries(updates)) {
-      const escaped = value.includes(' ') || value.includes('#') ? `"${value}"` : value;
+      // Always quote values that are long JWTs / contain special chars
+      const needsQuotes =
+        value.includes(' ') ||
+        value.includes('#') ||
+        value.includes('"') ||
+        value.includes('=') ||
+        value.length > 80 ||
+        key.includes('TOKEN') ||
+        key.includes('SECRET') ||
+        key.includes('PASSWORD') ||
+        key.includes('PASS');
+      const escaped = needsQuotes
+        ? `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+        : value;
       const idx = lines.findIndex((l) => l.startsWith(`${key}=`) || l.startsWith(`# ${key}=`));
       if (idx !== -1) {
         lines[idx] = `${key}=${escaped}`;
