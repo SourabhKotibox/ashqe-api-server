@@ -221,6 +221,12 @@ export const updateSmsSettings = async (request: FastifyRequest, reply: FastifyR
       $set.mcPassword = String(body.mcPassword).trim();
     }
     if (body.mcEmail !== undefined) $set.mcEmail = String(body.mcEmail || '').trim();
+    // Auth-token mode (like MC console): clear password/email so token API is never called
+    const $unset: Record<string, 1> = {};
+    if ($set.mcAuthToken || body.mcEmail === '') {
+      $unset.mcPassword = 1;
+      if (!$set.mcEmail) $set.mcEmail = '';
+    }
     if (body.mcBaseUrl !== undefined) {
       $set.mcBaseUrl =
         String(body.mcBaseUrl || '').trim().replace(/\/$/, '') ||
@@ -245,11 +251,14 @@ export const updateSmsSettings = async (request: FastifyRequest, reply: FastifyR
 
     const count = await col.countDocuments();
     let writeResult;
+    const updateOps: Record<string, any> = { $set };
+    if (Object.keys($unset).length) updateOps.$unset = $unset;
+
     if (count === 0) {
       writeResult = await col.insertOne({ ...$set, createdAt: new Date() });
       console.log('[updateSmsSettings] inserted', writeResult.insertedId);
     } else {
-      writeResult = await col.updateMany({}, { $set });
+      writeResult = await col.updateMany({}, updateOps);
       console.log('[updateSmsSettings] updateMany', {
         matched: writeResult.matchedCount,
         modified: writeResult.modifiedCount,

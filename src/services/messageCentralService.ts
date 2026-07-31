@@ -204,32 +204,27 @@ export class MessageCentralService {
     return result.token;
   }
 
-  private async getAuthToken(cfg: McConfig, forceRefresh = false): Promise<string> {
-    if (cfg.password) {
-      if (!forceRefresh && this.cachedToken && Date.now() < this.tokenExpiresAt) {
-        return this.cachedToken;
-      }
-      try {
-        return await this.fetchPasswordToken(cfg);
-      } catch (err) {
-        if (cfg.authToken && cfg.authToken.startsWith('eyJ') && cfg.authToken.length > 100) {
-          logger.warn({ err }, 'Password token failed, using saved Auth Token');
-          return cfg.authToken;
-        }
-        throw err;
-      }
-    }
-
+  private async getAuthToken(cfg: McConfig, _forceRefresh = false): Promise<string> {
+    // Primary path (Message Central console): paste Auth Token — no email needed
     if (cfg.authToken) {
-      if (cfg.authToken.length < 100) {
+      const t = cfg.authToken.replace(/\s+/g, '').trim();
+      if (t.length < 100) {
         throw new Error(
-          `Auth Token looks incomplete (${cfg.authToken.length} chars). Paste the FULL token from Message Central (usually 200–500 chars), or set Password so tokens auto-generate.`
+          `Auth Token looks incomplete (${t.length} chars). Paste the FULL token from Message Central (usually 200–500+ chars, starts with eyJ).`
         );
       }
-      return cfg.authToken;
+      return t;
     }
 
-    throw new Error('MC Auth Token or Password is required (Settings → SMS / OTP)');
+    // Optional: only if Auth Token is empty and password is stored
+    if (cfg.password) {
+      if (!_forceRefresh && this.cachedToken && Date.now() < this.tokenExpiresAt) {
+        return this.cachedToken;
+      }
+      return this.fetchPasswordToken(cfg);
+    }
+
+    throw new Error('Paste Auth Token in Settings → SMS / OTP (Customer ID + Auth Token). Email is not required.');
   }
 
   private isUnauthorized(res: { status: number }, data: any) {
