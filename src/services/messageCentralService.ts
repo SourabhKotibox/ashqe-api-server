@@ -156,43 +156,78 @@ export class MessageCentralService {
     );
   }
 
-  /** Mint a fresh JWT via email+password (preferred — console tokens expire). */
+  /** Mint a fresh JWT via customerId + Base64(password). Email is optional. */
   private async fetchPasswordToken(cfg: McConfig): Promise<string> {
     if (!cfg.password) {
       throw new Error('MC Password is required to refresh Auth Token');
     }
     const key = Buffer.from(cfg.password, 'utf8').toString('base64');
-    const params = new URLSearchParams({
-      customerId: cfg.customerId,
-      key,
-      scope: 'NEW',
-      country: cfg.countryCode,
-      ...(cfg.email ? { email: cfg.email } : {}),
-    });
 
-    const { res, data } = await fetchJson(
-      `${cfg.baseUrl}/auth/v1/authentication/token?${params}`
-    );
-    const token = extractToken(data);
-    if (!token) {
-      throw new Error(mcErrorMessage(data, res, 'Auth token generation failed'));
+    const tryToken = async (withEmail: boolean) => {
+      const params = new URLSearchParams({
+        customerId: cfg.customerId,
+        key,
+        scope: 'NEW',
+        country: cfg.countryCode || '91',
+      });
+      // Only send email when explicitly requested — wrong email causes
+      // "email is not found in database" from Message Central
+      if (withEmail && cfg.email) params.set('email', cfg.email);
+
+      const { res, data } = await fetchJson(
+        `${cfg.baseUrl}/auth/v1/authentication/token?${params}`
+      );
+      return { res, data, token: extractToken(data) };
+    };
+
+    // 1) customerId + password (no email) — works for most MC accounts
+    let result = await tryToken(false);
+    if (!result.token && cfg.email) {
+      // 2) retry with email if configured
+      result = await tryToken(true);
     }
-    this.cachedToken = token;
+
+    if (!result.token) {
+      const msg = mcErrorMessage(result.data, result.res, 'Auth token generation failed');
+      // Fall back to saved console Auth Token if it looks like a real JWT
+      if (cfg.authToken && cfg.authToken.startsWith('eyJ') && cfg.authToken.length > 100) {
+        logger.warn({ msg }, 'MC password token failed — falling back to saved Auth Token');
+        return cfg.authToken;
+      }
+      throw new Error(
+        `${msg}. Use the exact Message Central login password with Customer ID ${cfg.customerId}, or paste a full Auth Token (200+ chars starting with eyJ).`
+      );
+    }
+
+    this.cachedToken = result.token;
     this.tokenExpiresAt = Date.now() + 50 * 60 * 1000;
-    return token;
+    return result.token;
   }
 
   private async getAuthToken(cfg: McConfig, forceRefresh = false): Promise<string> {
-    // Prefer password-minted token when available (console JWT expires in ~24h)
     if (cfg.password) {
       if (!forceRefresh && this.cachedToken && Date.now() < this.tokenExpiresAt) {
         return this.cachedToken;
       }
-      return this.fetchPasswordToken(cfg);
+      try {
+        return await this.fetchPasswordToken(cfg);
+      } catch (err) {
+        if (cfg.authToken && cfg.authToken.startsWith('eyJ') && cfg.authToken.length > 100) {
+          logger.warn({ err }, 'Password token failed, using saved Auth Token');
+          return cfg.authToken;
+        }
+        throw err;
+      }
     }
 
-    if (cfg.authToken && !forceRefresh) return cfg.authToken;
-    if (cfg.authToken) return cfg.authToken;
+    if (cfg.authToken) {
+      if (cfg.authToken.length < 100) {
+        throw new Error(
+          `Auth Token looks incomplete (${cfg.authToken.length} chars). Paste the FULL token from Message Central (usually 200–500 chars), or set Password so tokens auto-generate.`
+        );
+      }
+      return cfg.authToken;
+    }
 
     throw new Error('MC Auth Token or Password is required (Settings → SMS / OTP)');
   }
