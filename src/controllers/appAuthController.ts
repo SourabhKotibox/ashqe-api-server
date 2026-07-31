@@ -5,7 +5,7 @@ import { SubscriptionPlanModel } from '../models/SubscriptionPlan';
 import { PlanLimitModel } from '../models/PlanLimit';
 import { LanguageModel } from '../models/Language';
 import { SubscriptionModel } from '../models/Subscription';
-import { MessageCentralService } from '../services/messageCentralService';
+import { messageCentral } from '../services/messageCentralService';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import { sendTemplateEmail } from '../lib/email';
@@ -13,8 +13,7 @@ import { SettingsModel } from '../models/Settings';
 import jwt from 'jsonwebtoken';
 import { normalizePlanKey } from './subscriptionController';
 
-const messageCentralService = new MessageCentralService();
-const STATIC_OTP = '1234';
+const messageCentralService = messageCentral;
 
 /** Prefer live Subscription rows so admin-created plans show on login immediately */
 async function resolveSubscriptionPayload(user: any) {
@@ -77,7 +76,7 @@ const sendOtpSchema = z.object({
 const verifyOtpSchema = z.object({
   mobileNumber: z.string().regex(/^\d{10}$/, 'Mobile number must be 10 digits'),
   verificationId: z.string().optional(),
-  otp: z.string().regex(/^\d{4}$/, 'OTP must be 4 digits'),
+  otp: z.string().regex(/^\d{4,8}$/, 'OTP must be 4–8 digits'),
   deviceId: z.string().optional(),
   deviceName: z.string().optional(),
 });
@@ -130,7 +129,7 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
     if (!verifyResult.success) {
       return reply.status(400).send({ 
         success: false, 
-        message: verifyResult.message || `Invalid OTP. Use ${STATIC_OTP}` 
+        message: verifyResult.message || 'Invalid or expired OTP',
       });
     }
 

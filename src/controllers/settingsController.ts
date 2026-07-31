@@ -41,7 +41,9 @@ export const getSettings = async (request: FastifyRequest, reply: FastifyReply) 
       const sensitiveFields = [
         'mailEmail', 'mailDriver', 'mailHost', 'mailPort', 'mailEncryption', 'mailUsername', 'mailPassword', 'mailFrom', 'mailFromName',
         'awsAccessKeyId', 'awsSecretAccessKey', 'awsRegion', 'awsBucket', 'awsPathStyleEndpoint', 'bunnyStorageZone', 'bunnyAccessKey',
-        'fcmServerKey', 'fcmSenderId', 'firebaseApiKey', 'firebaseProjectId', 'firebaseAppId'
+        'fcmServerKey', 'fcmSenderId', 'firebaseApiKey', 'firebaseProjectId', 'firebaseAppId',
+        'mcCustomerId', 'mcAuthToken', 'mcEmail', 'mcPassword', 'mcBaseUrl',
+        'razorpayKeySecret',
       ];
       for (const field of sensitiveFields) {
         delete publicSettings[field];
@@ -83,6 +85,17 @@ export const updateSettings = async (request: FastifyRequest, reply: FastifyRepl
     if (body.awsRegion !== undefined) envUpdates.AWS_S3_REGION = body.awsRegion;
     if (body.awsBucket !== undefined) envUpdates.AWS_S3_BUCKET_NAME = body.awsBucket;
     if (body.awsCdnUrl !== undefined) envUpdates.AWS_S3_PUBLIC_BASE_URL = body.awsCdnUrl;
+
+    // Message Central SMS / OTP
+    if (body.mcEnabled !== undefined) envUpdates.MC_ENABLED = body.mcEnabled ? 'true' : 'false';
+    if (body.mcCustomerId !== undefined) envUpdates.MC_CUSTOMER_ID = body.mcCustomerId;
+    if (body.mcAuthToken !== undefined && body.mcAuthToken) envUpdates.MC_AUTH_TOKEN = body.mcAuthToken;
+    if (body.mcEmail !== undefined) envUpdates.MC_EMAIL = body.mcEmail;
+    if (body.mcPassword !== undefined && body.mcPassword) envUpdates.MC_PASSWORD = body.mcPassword;
+    if (body.mcBaseUrl !== undefined) envUpdates.MC_BASE_URL = body.mcBaseUrl;
+    if (body.mcCountryCode !== undefined) envUpdates.MC_COUNTRY_CODE = body.mcCountryCode;
+    if (body.mcOtpLength !== undefined) envUpdates.MC_OTP_LENGTH = String(body.mcOtpLength);
+    if (body.mcFlowType !== undefined) envUpdates.MC_FLOW_TYPE = body.mcFlowType;
 
     if (Object.keys(envUpdates).length > 0) {
       updateEnvFile(envUpdates);

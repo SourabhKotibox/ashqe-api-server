@@ -133,6 +133,16 @@ export interface ISettings extends Document {
   razorpayEnabled: boolean;
   razorpayKeyId: string;
   razorpayKeySecret: string;
+  // Message Central SMS / OTP (VerifyNow)
+  mcEnabled: boolean;
+  mcCustomerId: string;
+  mcAuthToken: string;
+  mcEmail: string;
+  mcPassword: string;
+  mcBaseUrl: string;
+  mcCountryCode: string;
+  mcOtpLength: number;
+  mcFlowType: string;
 }
 
 const SettingsSchema = new Schema<ISettings>(
@@ -266,6 +276,16 @@ const SettingsSchema = new Schema<ISettings>(
     razorpayEnabled: { type: Boolean, default: false },
     razorpayKeyId: { type: String, default: '' },
     razorpayKeySecret: { type: String, default: '' },
+    // Message Central SMS / OTP (VerifyNow)
+    mcEnabled: { type: Boolean, default: false },
+    mcCustomerId: { type: String, default: '' },
+    mcAuthToken: { type: String, default: '' },
+    mcEmail: { type: String, default: '' },
+    mcPassword: { type: String, default: '' },
+    mcBaseUrl: { type: String, default: 'https://cpaas.messagecentral.com' },
+    mcCountryCode: { type: String, default: '91' },
+    mcOtpLength: { type: Number, default: 4 },
+    mcFlowType: { type: String, default: 'SMS' },
   },
   { timestamps: true }
 );
