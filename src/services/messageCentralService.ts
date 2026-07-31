@@ -25,13 +25,8 @@ interface MessageCentralConfig {
   flowType: string;
 }
 
-const STATIC_OTP = '1234';
-const STATIC_VERIFICATION_ID = 'static-otp-verification';
 const DEFAULT_BASE = 'https://cpaas.messagecentral.com';
 const MC_TIMEOUT_MS = 12_000;
-
-/** Static 1234 ONLY when ALLOW_STATIC_OTP=true. Never auto-enable via NODE_ENV. */
-const allowStaticOtp = () => process.env.ALLOW_STATIC_OTP === 'true';
 
 async function fetchJson(
   url: string,
@@ -98,7 +93,7 @@ export class MessageCentralService {
   }
 
   private missingKeysMessage() {
-    return 'Message Gateway is not configured. Admin → Settings → Message Gateway (OTP): paste Customer ID + Auth Token, turn Enable ON, then Save.';
+    return 'Message Gateway is not configured. Admin → Settings → Message Gateway: paste Customer ID + Auth Token, Enable ON, then Save.';
   }
 
   private async getAuthToken(cfg: MessageCentralConfig): Promise<string> {
@@ -157,14 +152,6 @@ export class MessageCentralService {
     }
 
     if (!this.useLive(cfg)) {
-      if (allowStaticOtp()) {
-        logger.warn('Message Central not live — static OTP 1234 (ALLOW_STATIC_OTP=true)');
-        return {
-          success: true,
-          verificationId: STATIC_VERIFICATION_ID,
-          message: `OTP sent successfully. Use ${STATIC_OTP} as OTP (dev fallback)`,
-        };
-      }
       logger.error(
         {
           enabled: cfg.enabled,
@@ -173,7 +160,7 @@ export class MessageCentralService {
           authTokenLen: cfg.authToken?.length || 0,
           hasPassword: !!cfg.password,
         },
-        'Message Central OTP blocked — not configured (website would get no SMS)'
+        'Message Gateway OTP blocked — not configured'
       );
       return { success: false, message: this.missingKeysMessage() };
     }
@@ -256,19 +243,10 @@ export class MessageCentralService {
     const otp = String(code || '').trim();
 
     if (!this.useLive(cfg)) {
-      if (allowStaticOtp() && verificationId === STATIC_VERIFICATION_ID) {
-        if (otp === STATIC_OTP) return { success: true, message: 'OTP verified successfully' };
-        return { success: false, message: `Invalid OTP. Use ${STATIC_OTP}` };
-      }
       return { success: false, message: this.missingKeysMessage() };
     }
 
-    // Reject stale static sessions once live is on
-    if (verificationId === STATIC_VERIFICATION_ID) {
-      return { success: false, message: 'Invalid verification session. Request a new OTP.' };
-    }
-
-    if (!verificationId) {
+    if (!verificationId || verificationId === 'static-otp-verification') {
       return { success: false, message: 'Missing verificationId — request a new OTP' };
     }
 
