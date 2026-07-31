@@ -69,7 +69,8 @@ export const getAppProfile = async (request: FastifyRequest, reply: FastifyReply
             const decoded = server.jwt.verify(token) as any;
             if (decoded.deviceId && decoded.deviceId !== 'unknown') {
               const deviceExists = (user as any).devices?.some((d: any) => d.deviceId === decoded.deviceId);
-              if (!deviceExists) {
+              // Do not kick web/OTP sessions just because device list is empty after account merge
+              if (!deviceExists && Array.isArray((user as any).devices) && (user as any).devices.length > 0) {
                 return reply.status(401).send({ success: false, message: 'Device was removed, please login again.' });
               }
             }
@@ -638,8 +639,40 @@ export const updateAppProfile = async (request: FastifyRequest, reply: FastifyRe
       });
 
       if (existing) {
-        const currentIsTemp = String(current.email || '').endsWith('@temp.local');
-        if (!currentIsTemp) {
+        const currentEmail = String(current.email || '').toLowerCase();
+        const currentIsTemp = currentEmail.endsWith('@temp.local');
+        const currentPlan = String((current as any).subscriptionPlan || 'free').toLowerCase();
+        const currentActive =
+          (current as any).subscriptionStatus === 'active' &&
+          currentPlan !== 'free' &&
+          (!(current as any).subscriptionExpiry || new Date((current as any).subscriptionExpiry) > new Date());
+
+        // Load live sub on the email account
+        const existingLiveSub = await SubscriptionModel.findOne({
+          userId: existing._id,
+          status: 'active',
+          $or: [{ endDate: { $gte: new Date() } }, { endDate: null }, { endDate: { $exists: false } }],
+        })
+          .sort({ endDate: -1 })
+          .lean();
+
+        const existingPlanField = String((existing as any).subscriptionPlan || 'free').toLowerCase();
+        const existingHasSub =
+          !!existingLiveSub ||
+          ((existing as any).subscriptionStatus === 'active' &&
+            existingPlanField !== 'free' &&
+            (!(existing as any).subscriptionExpiry ||
+              new Date((existing as any).subscriptionExpiry) > new Date()));
+
+        // Merge when OTP temp account links a real email, OR free account claims a subscribed email
+        if (!currentIsTemp && currentActive) {
+          return reply.status(400).send({
+            success: false,
+            message:
+              'This email is already registered to another account. Log in with that email, or use a different email.',
+          });
+        }
+        if (!currentIsTemp && !existingHasSub) {
           return reply.status(400).send({
             success: false,
             message:
@@ -647,37 +680,54 @@ export const updateAppProfile = async (request: FastifyRequest, reply: FastifyRe
           });
         }
 
-        // Merge temp OTP user → existing subscribed account
+        // Merge current (phone/temp) → existing (email + subscription)
         const phoneToKeep =
           nextPhone ||
-          String((existing as any).phone || '').replace(/\D/g, '').slice(-10) ||
-          String((current as any).phone || '').replace(/\D/g, '').slice(-10);
+          String((current as any).phone || '').replace(/\D/g, '').slice(-10) ||
+          String((existing as any).phone || '').replace(/\D/g, '').slice(-10);
 
         if (phoneToKeep) {
-          (existing as any).phone = phoneToKeep;
-          // Clear phone on any other docs to avoid unique conflicts if any
           await UserModel.updateMany(
-            { _id: { $ne: existing._id }, phone: { $in: [phoneToKeep, `91${phoneToKeep}`, `+91${phoneToKeep}`] } },
+            {
+              _id: { $ne: existing._id },
+              phone: { $in: [phoneToKeep, `91${phoneToKeep}`, `+91${phoneToKeep}`] },
+            },
             { $unset: { phone: 1 } }
           );
+          (existing as any).phone = phoneToKeep;
         }
-        if (nextName && (existing.name === 'User' || !existing.name)) {
-          existing.name = nextName;
+        if (nextName) existing.name = nextName;
+        if (nextAvatar) (existing as any).avatar = nextAvatar;
+
+        // Heal subscription fields from live Subscription row
+        if (existingLiveSub) {
+          const n = String(existingLiveSub.plan || '').toLowerCase();
+          const planKey = n.includes('premium')
+            ? 'premium'
+            : n.includes('standard')
+              ? 'standard'
+              : n.includes('basic')
+                ? 'basic'
+                : existingPlanField !== 'free'
+                  ? existingPlanField
+                  : 'standard';
+          (existing as any).subscriptionPlan = planKey;
+          (existing as any).subscriptionStatus = 'active';
+          (existing as any).subscriptionExpiry = existingLiveSub.endDate || null;
+          (existing as any).subscriptionPlanId = existingLiveSub.planId || null;
         }
-        if (nextAvatar && !(existing as any).avatar) {
-          (existing as any).avatar = nextAvatar;
-        }
-        // Prefer keeping existing subscription fields as-is
+
         existing.lastLogin = new Date();
         await existing.save();
 
         const tempId = current._id;
-        // Reassign lightweight related data to the real account
         await Promise.all([
           UserWishlistModel.updateMany({ userId: tempId }, { $set: { userId: existing._id } }),
           UserLikeModel.updateMany({ userId: tempId }, { $set: { userId: existing._id } }),
           UserDownloadModel.updateMany({ userId: tempId }, { $set: { userId: existing._id } }),
           UserWatchProgressModel.updateMany({ userId: tempId }, { $set: { userId: existing._id } }),
+          SubscriptionModel.updateMany({ userId: tempId }, { $set: { userId: existing._id } }),
+          TransactionModel.updateMany({ userId: tempId }, { $set: { userId: existing._id } }),
         ]);
         await UserModel.findByIdAndDelete(tempId);
 
@@ -687,31 +737,43 @@ export const updateAppProfile = async (request: FastifyRequest, reply: FastifyRe
             id: existing._id.toString(),
             name: existing.name,
             phone: (existing as any).phone,
+            email: existing.email,
             role: 'user',
             deviceId: 'unknown',
           },
           { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '7d' }
         );
 
+        const planOut = String((existing as any).subscriptionPlan || 'free').toLowerCase();
+        const statusOut = String((existing as any).subscriptionStatus || 'inactive');
+        const expiryOut = (existing as any).subscriptionExpiry || null;
+        const isActive =
+          statusOut === 'active' &&
+          planOut !== 'free' &&
+          (!expiryOut || new Date(expiryOut) > new Date());
+
         logger.info(
-          { from: String(tempId), to: String(existing._id), email: nextEmail },
-          'Merged temp OTP account into existing email account'
+          { from: String(tempId), to: String(existing._id), email: nextEmail, isActive },
+          'Merged phone/temp account into email account'
         );
 
         return reply.send({
           success: true,
           merged: true,
           accessToken,
-          message: 'Linked to your existing account with subscription.',
+          message: isActive
+            ? 'Linked to your subscribed account. Reloading…'
+            : 'Linked to your existing account.',
           data: {
             id: existing._id.toString(),
             name: existing.name,
             email: existing.email,
             avatar: (existing as any).avatar || null,
             phone: (existing as any).phone || null,
-            subscriptionPlan: (existing as any).subscriptionPlan || 'free',
-            subscriptionStatus: (existing as any).subscriptionStatus || 'inactive',
-            subscriptionExpiry: (existing as any).subscriptionExpiry || null,
+            subscription: isActive,
+            subscriptionPlan: isActive ? planOut : 'free',
+            subscriptionStatus: isActive ? 'active' : 'inactive',
+            subscriptionExpiry: expiryOut,
           },
         });
       }
