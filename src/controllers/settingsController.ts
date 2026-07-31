@@ -78,46 +78,61 @@ export const getSettings = async (request: FastifyRequest, reply: FastifyReply) 
 
 export const updateSettings = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
-    const body = request.body as Record<string, any>;
-    const $set: Record<string, any> = { ...body };
+    const body = (request.body || {}) as Record<string, any>;
 
-    // Sanitize Message Central secrets (strip whitespace/newlines from pasted JWT)
-    if (typeof $set.mcAuthToken === 'string') {
-      $set.mcAuthToken = $set.mcAuthToken.replace(/\s+/g, '').trim();
-      if (!$set.mcAuthToken) delete $set.mcAuthToken; // keep existing
+    // Whitelist Message Central fields so they always persist (even if other
+    // keys in the body are ignored by schema elsewhere).
+    const mcSet: Record<string, any> = {};
+    if (body.mcEnabled !== undefined) {
+      mcSet.mcEnabled = body.mcEnabled === true || body.mcEnabled === 'true';
     }
-    if (typeof $set.mcPassword === 'string') {
-      $set.mcPassword = $set.mcPassword.trim();
-      if (!$set.mcPassword) delete $set.mcPassword;
+    if (typeof body.mcCustomerId === 'string') {
+      mcSet.mcCustomerId = body.mcCustomerId.trim();
     }
-    if (typeof $set.mcCustomerId === 'string') {
-      $set.mcCustomerId = $set.mcCustomerId.trim();
+    if (typeof body.mcAuthToken === 'string') {
+      const t = body.mcAuthToken.replace(/\s+/g, '').trim();
+      if (t) mcSet.mcAuthToken = t;
     }
-    if (typeof $set.mcEmail === 'string') {
-      $set.mcEmail = $set.mcEmail.trim();
+    if (typeof body.mcPassword === 'string') {
+      const p = body.mcPassword.trim();
+      if (p) mcSet.mcPassword = p;
     }
-    if (typeof $set.mcBaseUrl === 'string') {
-      $set.mcBaseUrl = $set.mcBaseUrl.trim().replace(/\/$/, '');
+    if (typeof body.mcEmail === 'string') mcSet.mcEmail = body.mcEmail.trim();
+    if (typeof body.mcBaseUrl === 'string') {
+      mcSet.mcBaseUrl = body.mcBaseUrl.trim().replace(/\/$/, '') || 'https://cpaas.messagecentral.com';
     }
-    if (typeof $set.mcCountryCode === 'string') {
-      $set.mcCountryCode = $set.mcCountryCode.trim().replace(/^\+/, '');
+    if (typeof body.mcCountryCode === 'string') {
+      mcSet.mcCountryCode = body.mcCountryCode.trim().replace(/^\+/, '') || '91';
     }
-    if ($set.mcOtpLength !== undefined) {
-      $set.mcOtpLength = Math.min(8, Math.max(4, Number($set.mcOtpLength) || 4));
+    if (body.mcOtpLength !== undefined) {
+      mcSet.mcOtpLength = Math.min(8, Math.max(4, Number(body.mcOtpLength) || 4));
     }
-    if ($set.mcEnabled !== undefined) {
-      $set.mcEnabled = $set.mcEnabled === true || $set.mcEnabled === 'true';
+    if (typeof body.mcFlowType === 'string') {
+      mcSet.mcFlowType = body.mcFlowType.trim().toUpperCase() || 'SMS';
     }
 
-    // Persist via native collection update so new fields always stick
-    // (avoids any stale-schema strip issues until process restart)
-    await SettingsModel.collection.updateOne(
-      {},
-      { $set, $setOnInsert: { createdAt: new Date() } },
-      { upsert: true }
-    );
+    // Everything else (mail, storage, branding, …)
+    const $set: Record<string, any> = { ...body, ...mcSet };
+    // Never persist client-only flags
+    delete $set.mcAuthTokenSet;
+    delete $set.mcPasswordSet;
+    delete $set._id;
+    delete $set.__v;
+    // Don't blank secrets with empty strings
+    if ($set.mcAuthToken === '') delete $set.mcAuthToken;
+    if ($set.mcPassword === '') delete $set.mcPassword;
 
-    const settings = await SettingsModel.findOne().lean<any>();
+    const col = SettingsModel.collection;
+    const existingCount = await col.countDocuments();
+    if (existingCount === 0) {
+      await col.insertOne({ ...$set, createdAt: new Date(), updatedAt: new Date() });
+    } else {
+      // Update ALL settings docs — avoids duplicate-doc hide bugs
+      await col.updateMany({}, { $set: { ...$set, updatedAt: new Date() } });
+    }
+
+    // Read back via native driver (source of truth)
+    const settings = await col.findOne({}, { sort: { updatedAt: -1 } }) as any;
 
     // Sync SMTP + storage + MC fields to .env
     const envUpdates: Record<string, string> = {};
@@ -137,15 +152,15 @@ export const updateSettings = async (request: FastifyRequest, reply: FastifyRepl
     if (body.awsBucket !== undefined) envUpdates.AWS_S3_BUCKET_NAME = body.awsBucket;
     if (body.awsCdnUrl !== undefined) envUpdates.AWS_S3_PUBLIC_BASE_URL = body.awsCdnUrl;
 
-    if ($set.mcEnabled !== undefined) envUpdates.MC_ENABLED = $set.mcEnabled ? 'true' : 'false';
-    if ($set.mcCustomerId !== undefined) envUpdates.MC_CUSTOMER_ID = $set.mcCustomerId;
-    if ($set.mcAuthToken) envUpdates.MC_AUTH_TOKEN = $set.mcAuthToken;
-    if ($set.mcEmail !== undefined) envUpdates.MC_EMAIL = $set.mcEmail;
-    if ($set.mcPassword) envUpdates.MC_PASSWORD = $set.mcPassword;
-    if ($set.mcBaseUrl !== undefined) envUpdates.MC_BASE_URL = $set.mcBaseUrl;
-    if ($set.mcCountryCode !== undefined) envUpdates.MC_COUNTRY_CODE = $set.mcCountryCode;
-    if ($set.mcOtpLength !== undefined) envUpdates.MC_OTP_LENGTH = String($set.mcOtpLength);
-    if ($set.mcFlowType !== undefined) envUpdates.MC_FLOW_TYPE = $set.mcFlowType;
+    if (mcSet.mcEnabled !== undefined) envUpdates.MC_ENABLED = mcSet.mcEnabled ? 'true' : 'false';
+    if (mcSet.mcCustomerId !== undefined) envUpdates.MC_CUSTOMER_ID = mcSet.mcCustomerId;
+    if (mcSet.mcAuthToken) envUpdates.MC_AUTH_TOKEN = mcSet.mcAuthToken;
+    if (mcSet.mcEmail !== undefined) envUpdates.MC_EMAIL = mcSet.mcEmail;
+    if (mcSet.mcPassword) envUpdates.MC_PASSWORD = mcSet.mcPassword;
+    if (mcSet.mcBaseUrl !== undefined) envUpdates.MC_BASE_URL = mcSet.mcBaseUrl;
+    if (mcSet.mcCountryCode !== undefined) envUpdates.MC_COUNTRY_CODE = mcSet.mcCountryCode;
+    if (mcSet.mcOtpLength !== undefined) envUpdates.MC_OTP_LENGTH = String(mcSet.mcOtpLength);
+    if (mcSet.mcFlowType !== undefined) envUpdates.MC_FLOW_TYPE = mcSet.mcFlowType;
 
     if (Object.keys(envUpdates).length > 0) {
       updateEnvFile(envUpdates);
@@ -156,6 +171,14 @@ export const updateSettings = async (request: FastifyRequest, reply: FastifyRepl
     const mcPasswordSet = !!safe.mcPassword;
     delete safe.mcAuthToken;
     delete safe.mcPassword;
+
+    // If client sent MC secrets but they didn't land, fail loudly
+    if ((mcSet.mcAuthToken || mcSet.mcCustomerId || mcSet.mcEnabled) && !safe.mcCustomerId && mcSet.mcCustomerId) {
+      return reply.status(500).send({
+        success: false,
+        error: 'SMS settings failed to persist — check server MongoDB connection',
+      });
+    }
 
     return reply.send({
       success: true,

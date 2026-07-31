@@ -51,7 +51,13 @@ function pick(settingsVal: unknown, envVal: string | undefined, fallback = ''): 
 }
 
 export async function loadMcConfig(): Promise<McConfig> {
-  const settings = await SettingsModel.findOne().lean<any>().catch(() => null);
+  // Prefer native collection read so we never miss fields due to schema lag
+  let settings: any = null;
+  try {
+    settings = await SettingsModel.collection.findOne({}, { sort: { updatedAt: -1 } });
+  } catch {
+    settings = await SettingsModel.findOne().lean<any>().catch(() => null);
+  }
 
   const otpLen = Number(
     pick(settings?.mcOtpLength, process.env.MC_OTP_LENGTH, '4') || 4
