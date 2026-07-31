@@ -40,9 +40,7 @@ const STATIC_VERIFICATION_ID = 'static-otp-verification';
 const DEFAULT_BASE = 'https://cpaas.messagecentral.com';
 const TIMEOUT_MS = 15_000;
 
-const allowStaticOtp = () =>
-  process.env.ALLOW_STATIC_OTP === 'true' ||
-  process.env.NODE_ENV === 'development';
+const allowStaticOtp = () => process.env.ALLOW_STATIC_OTP === 'true';
 
 function pick(settingsVal: unknown, envVal: string | undefined, fallback = ''): string {
   const fromDb = String(settingsVal ?? '').trim();
@@ -226,24 +224,37 @@ export class MessageCentralService {
 
     try {
       let token = await this.getAuthToken(cfg);
+      // Match Message Central VerifyNow docs: countryCode, flowType, mobileNumber, type=OTP
       const params = new URLSearchParams({
         countryCode: cfg.countryCode,
-        customerId: cfg.customerId,
         flowType: cfg.flowType || 'SMS',
+        type: 'OTP',
         mobileNumber: phone,
         otpLength: String(cfg.otpLength),
       });
+      if (cfg.customerId) params.set('customerId', cfg.customerId);
 
       const doSend = (authToken: string) =>
         fetchJson(`${cfg.baseUrl}/verification/v3/send?${params}`, {
           method: 'POST',
           headers: {
             authToken,
-            Accept: 'application/json',
+            Accept: '*/*',
           },
         });
 
       let { res, data } = await doSend(token);
+      logger.info(
+        {
+          phone,
+          httpStatus: res.status,
+          responseCode: data?.responseCode,
+          message: data?.message,
+          hasVerificationId: !!extractVerificationId(data),
+          errorMessage: data?.data?.errorMessage || data?.errorMessage,
+        },
+        'MC send OTP response'
+      );
 
       // Expired console token → refresh via password if possible
       if (this.isUnauthorized(res, data)) {
@@ -261,27 +272,29 @@ export class MessageCentralService {
       }
 
       const verificationId = extractVerificationId(data);
+      const mcCode = Number(data?.responseCode ?? data?.data?.responseCode ?? res.status);
 
-      // Some MC responses nest differently or use responseCode != 200
-      if (!verificationId) {
-        const code = Number(data?.responseCode ?? data?.status ?? res.status);
-        logger.error({ status: res.status, code, data }, 'MC send OTP failed');
+      // Reject non-success MC codes even if some id-looking field exists
+      if (mcCode && mcCode !== 200) {
+        logger.error({ status: res.status, mcCode, data }, 'MC send OTP non-200');
         return {
           success: false,
-          message: mcErrorMessage(
-            data,
-            res,
-            code && code !== 200
-              ? `Message Central rejected send (code ${code})`
-              : 'Failed to send OTP'
-          ),
+          message: mcErrorMessage(data, res, `Message Central error ${mcCode}`),
+        };
+      }
+
+      if (!verificationId) {
+        logger.error({ status: res.status, mcCode, data }, 'MC send OTP failed');
+        return {
+          success: false,
+          message: mcErrorMessage(data, res, 'Failed to send OTP'),
         };
       }
 
       return {
         success: true,
         verificationId,
-        message: 'OTP sent successfully',
+        message: 'OTP sent successfully via SMS',
       };
     } catch (err: any) {
       logger.error({ err }, 'MC send OTP exception');
