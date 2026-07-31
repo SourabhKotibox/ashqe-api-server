@@ -12,6 +12,21 @@ import {
 } from '../controllers/appAuthController';
 
 const appAuthRoutes: FastifyPluginAsync = async (fastify) => {
+  fastify.get('/app/auth/otp-status', async (_request, reply) => {
+    const { loadMcConfig } = await import('../services/messageCentralService');
+    const cfg = await loadMcConfig();
+    const live = !!(cfg.customerId && cfg.authToken);
+    return reply.send({
+      success: true,
+      mode: live ? 'message-gateway' : 'not-configured',
+      enabled: cfg.enabled,
+      customerIdSet: !!cfg.customerId,
+      authTokenSet: !!cfg.authToken,
+      authTokenLen: cfg.authToken?.length || 0,
+      staticOtp: false,
+      build: 'message-gateway-only',
+    });
+  });
   fastify.post('/app/auth/send-otp', sendOtp);
   fastify.post('/app/auth/verify-otp', verifyOtp);
   // Aliases some mobile builds use
