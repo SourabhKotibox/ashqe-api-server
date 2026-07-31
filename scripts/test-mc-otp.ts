@@ -15,22 +15,26 @@ async function main() {
   await mongoose.connect(ensureMongoDbName(process.env.MONGODB_URI!));
   const cfg = await loadMcConfig();
 
-  console.log('—— Message Central config ——');
-  console.log('enabled     :', cfg.enabled);
-  console.log('customerId  :', cfg.customerId || '(empty)');
-  console.log('authToken   :', cfg.authToken ? `${cfg.authToken.slice(0, 12)}… (${cfg.authToken.length} chars)` : '(empty)');
-  console.log('email       :', cfg.email || '(empty)');
-  console.log('password    :', cfg.password ? '(set)' : '(empty)');
-  console.log('baseUrl     :', cfg.baseUrl);
-  console.log('countryCode :', cfg.countryCode);
-  console.log('otpLength   :', cfg.otpLength);
-  console.log('flowType    :', cfg.flowType);
+  console.log('—— Message Gateway (messageCentral* DB fields) ——');
+  console.log('messageCentralEnabled     :', cfg.enabled);
+  console.log('messageCentralCustomerId  :', cfg.customerId || '(empty)');
+  console.log(
+    'messageCentralAuthToken   :',
+    cfg.authToken
+      ? `${cfg.authToken.slice(0, 12)}… (${cfg.authToken.length} chars)`
+      : 'EMPTY / stripped'
+  );
+  console.log('messageCentralBaseUrl     :', cfg.baseUrl);
+  console.log('messageCentralCountryCode :', cfg.countryCode);
+  console.log('messageCentralOtpLength   :', cfg.otpLength);
+  console.log('messageCentralFlowType    :', cfg.flowType);
+  console.log('==== .env MC lines ==== (not required — DB is source of truth)');
 
-  if (!cfg.enabled || !cfg.customerId || (!cfg.authToken && !cfg.password)) {
-    console.log('\n❌ Not ready. In Admin → Settings → SMS / OTP:');
-    console.log('   1. Enable Message Central');
+  if (!cfg.customerId || (!cfg.authToken && !cfg.password)) {
+    console.log('\n❌ Not ready. Admin → Settings → Message Gateway:');
+    console.log('   1. Enable OTP gateway');
     console.log('   2. Paste Customer ID');
-    console.log('   3. Paste a FRESH Auth Token, OR set Email + Password (recommended)');
+    console.log('   3. Paste FULL Auth Token (200+ chars), then Save');
     await mongoose.disconnect();
     process.exit(1);
   }
@@ -42,7 +46,8 @@ async function main() {
     return;
   }
 
-  console.log(`\nSending OTP to ${phone}…`);
+  console.log(`\n==== live send-otp ====`);
+  console.log(`Sending OTP to ${phone}…`);
   const result = await messageCentral.sendOtp(phone);
   console.log(result);
 
