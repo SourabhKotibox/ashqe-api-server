@@ -66,12 +66,34 @@ export async function loadMcConfig(): Promise<McConfig> {
       ? settings.mcEnabled
       : String(process.env.MC_ENABLED || '').toLowerCase() === 'true';
 
+  const rawToken = pick(settings?.mcAuthToken, process.env.MC_AUTH_TOKEN);
+  // Truncated console pastes (e.g. 46 chars) are useless — treat as missing
+  const authToken = rawToken.length >= 100 ? rawToken : '';
+  if (rawToken && !authToken) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[MC] Ignoring truncated Auth Token (${rawToken.length} chars). Need full JWT (200+ chars).`
+    );
+  }
+
+  const rawEmail = pick(settings?.mcEmail, process.env.MC_EMAIL);
+  const email =
+    !rawEmail ||
+    /YOUR_MESSAGE|example\.com|placeholder/i.test(rawEmail)
+      ? ''
+      : rawEmail;
+
+  // Prefer Auth Token only — ignore leftover password when a real token exists
+  const password = authToken
+    ? ''
+    : pick(settings?.mcPassword, process.env.MC_PASSWORD);
+
   return {
     enabled,
     customerId: pick(settings?.mcCustomerId, process.env.MC_CUSTOMER_ID),
-    email: pick(settings?.mcEmail, process.env.MC_EMAIL),
-    password: pick(settings?.mcPassword, process.env.MC_PASSWORD),
-    authToken: pick(settings?.mcAuthToken, process.env.MC_AUTH_TOKEN),
+    email,
+    password,
+    authToken,
     baseUrl: pick(settings?.mcBaseUrl, process.env.MC_BASE_URL, DEFAULT_BASE).replace(/\/$/, ''),
     countryCode: pick(settings?.mcCountryCode, process.env.MC_COUNTRY_CODE, '91').replace(/^\+/, ''),
     otpLength: otpLen >= 4 && otpLen <= 8 ? otpLen : 4,
@@ -83,8 +105,8 @@ function configGapMessage(cfg: McConfig): string {
   const missing: string[] = [];
   if (!cfg.enabled) missing.push('Enable toggle is OFF');
   if (!cfg.customerId) missing.push('Customer ID');
-  if (!cfg.authToken && !cfg.password) missing.push('Auth Token or Password');
-  return `SMS OTP not ready: ${missing.join(', ') || 'incomplete config'}. Admin → Settings → SMS / OTP`;
+  if (!cfg.authToken) missing.push('full Auth Token (200+ chars)');
+  return `SMS OTP not ready: ${missing.join(', ') || 'incomplete config'}. Admin → Settings → SMS / OTP — paste Customer ID + full Auth Token (no email).`;
 }
 
 async function fetchJson(url: string, init: RequestInit = {}) {
