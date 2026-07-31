@@ -213,35 +213,37 @@ export const updateSettings = async (request: FastifyRequest, reply: FastifyRepl
 export const updateSmsSettings = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const body = (request.body || {}) as Record<string, any>;
-    const db = SettingsModel.db.db;
-    if (!db) {
-      return reply.status(500).send({ success: false, error: 'Database not connected' });
-    }
-    const col = db.collection('settings');
 
     const enabledRaw = body.messageCentralEnabled ?? body.mcEnabled;
     const customerId = String(body.messageCentralCustomerId ?? body.mcCustomerId ?? '').trim();
-    const authToken = String(body.messageCentralAuthToken ?? body.mcAuthToken ?? '').replace(/\s+/g, '').trim();
+    const authToken = String(body.messageCentralAuthToken ?? body.mcAuthToken ?? '')
+      .replace(/\s+/g, '')
+      .trim();
     const password = String(body.messageCentralPassword ?? body.mcPassword ?? '').trim();
     const email = String(body.messageCentralEmail ?? body.mcEmail ?? '').trim();
-    const baseUrl = String(
-      body.messageCentralBaseUrl ?? body.mcBaseUrl ?? 'https://cpaas.messagecentral.com'
-    ).trim().replace(/\/$/, '') || 'https://cpaas.messagecentral.com';
-    const countryCode = String(
-      body.messageCentralCountryCode ?? body.mcCountryCode ?? '91'
-    ).replace(/^\+/, '') || '91';
+    const baseUrl =
+      String(body.messageCentralBaseUrl ?? body.mcBaseUrl ?? 'https://cpaas.messagecentral.com')
+        .trim()
+        .replace(/\/$/, '') || 'https://cpaas.messagecentral.com';
+    const countryCode =
+      String(body.messageCentralCountryCode ?? body.mcCountryCode ?? '91').replace(/^\+/, '') || '91';
     const otpLength = Math.min(
       8,
       Math.max(4, Number(body.messageCentralOtpLength ?? body.mcOtpLength) || 4)
     );
-    const flowType = String(
-      body.messageCentralFlowType ?? body.mcFlowType ?? 'SMS'
-    ).toUpperCase() || 'SMS';
+    const flowType =
+      String(body.messageCentralFlowType ?? body.mcFlowType ?? 'SMS').toUpperCase() || 'SMS';
+
+    if (!customerId) {
+      return reply.status(400).send({ success: false, error: 'Customer ID is required' });
+    }
 
     const $set: Record<string, any> = {
       updatedAt: new Date(),
       messageCentralEnabled:
-        enabledRaw === undefined ? true : enabledRaw === true || enabledRaw === 'true' || enabledRaw === 1,
+        enabledRaw === undefined
+          ? true
+          : enabledRaw === true || enabledRaw === 'true' || enabledRaw === 1,
       messageCentralCustomerId: customerId,
       messageCentralBaseUrl: baseUrl,
       messageCentralCountryCode: countryCode,
@@ -249,72 +251,117 @@ export const updateSmsSettings = async (request: FastifyRequest, reply: FastifyR
       messageCentralFlowType: flowType,
       messageCentralEmail: email,
     };
-    if (authToken) $set.messageCentralAuthToken = authToken;
-    if (password) $set.messageCentralPassword = password;
+    if (authToken) {
+      $set.messageCentralAuthToken = authToken;
+    }
+    if (password) {
+      $set.messageCentralPassword = password;
+    }
 
-    // Drop legacy mc* keys so only Tataiya names are source of truth
-    const $unset: Record<string, 1> = {
-      mcEnabled: 1,
-      mcCustomerId: 1,
-      mcAuthToken: 1,
-      mcPassword: 1,
-      mcEmail: 1,
-      mcBaseUrl: 1,
-      mcCountryCode: 1,
-      mcOtpLength: 1,
-      mcFlowType: 1,
-    };
+    // Prefer mongoose upsert with strict:false so new fields always land
+    // even if an older process had a stale schema cache.
+    const doc = await SettingsModel.findOneAndUpdate(
+      {},
+      {
+        $set,
+        $unset: {
+          mcEnabled: 1,
+          mcCustomerId: 1,
+          mcAuthToken: 1,
+          mcPassword: 1,
+          mcEmail: 1,
+          mcBaseUrl: 1,
+          mcCountryCode: 1,
+          mcOtpLength: 1,
+          mcFlowType: 1,
+        },
+      },
+      {
+        new: true,
+        upsert: true,
+        setDefaultsOnInsert: true,
+        strict: false,
+        lean: true,
+      }
+    );
 
-    console.log('[updateSmsSettings] writing messageCentral* keys', {
-      hasToken: !!$set.messageCentralAuthToken,
-      tokenLen: $set.messageCentralAuthToken ? String($set.messageCentralAuthToken).length : 0,
-      customerId: $set.messageCentralCustomerId,
+    // Native verify (source of truth)
+    const raw = await SettingsModel.collection
+      .find({})
+      .sort({ updatedAt: -1 })
+      .limit(1)
+      .next();
+
+    const tokenOnDisk = String(
+      raw?.messageCentralAuthToken || (doc as any)?.messageCentralAuthToken || ''
+    ).trim();
+    const messageCentralAuthTokenSet = tokenOnDisk.length > 0;
+    const messageCentralPasswordSet = !!(
+      raw?.messageCentralPassword || (doc as any)?.messageCentralPassword
+    );
+
+    console.log('[updateSmsSettings]', {
+      bodyKeys: Object.keys(body),
+      receivedTokenLen: authToken.length,
+      savedTokenLen: tokenOnDisk.length,
+      customerId,
       enabled: $set.messageCentralEnabled,
     });
 
-    const count = await col.countDocuments();
-    if (count === 0) {
-      await col.insertOne({ ...$set, createdAt: new Date() });
-    } else {
-      await col.updateMany({}, { $set, $unset });
-    }
-
-    const doc = await col.find({}).sort({ updatedAt: -1 }).limit(1).next();
-    if (!doc) {
-      return reply.status(500).send({ success: false, error: 'Settings document missing after write' });
-    }
-
-    const messageCentralAuthTokenSet = !!doc.messageCentralAuthToken;
-    const messageCentralPasswordSet = !!doc.messageCentralPassword;
-
     if (authToken && !messageCentralAuthTokenSet) {
-      return reply.status(500).send({
-        success: false,
-        error: 'Auth token write verification failed',
-      });
+      // Last-resort native write
+      await SettingsModel.collection.updateMany(
+        {},
+        { $set: { messageCentralAuthToken: authToken, updatedAt: new Date() } }
+      );
+      const retry = await SettingsModel.collection
+        .find({})
+        .sort({ updatedAt: -1 })
+        .limit(1)
+        .next();
+      const retryToken = String(retry?.messageCentralAuthToken || '').trim();
+      if (!retryToken) {
+        return reply.status(500).send({
+          success: false,
+          error: 'Auth token write verification failed',
+          debug: {
+            receivedTokenLen: authToken.length,
+            bodyHadToken: !!(body.messageCentralAuthToken || body.mcAuthToken),
+            bodyKeys: Object.keys(body),
+          },
+        });
+      }
     }
+
+    const finalDoc =
+      (await SettingsModel.collection.find({}).sort({ updatedAt: -1 }).limit(1).next()) || raw;
 
     return reply.send({
       success: true,
       data: {
-        messageCentralEnabled: !!doc.messageCentralEnabled,
-        messageCentralCustomerId: doc.messageCentralCustomerId || '',
-        messageCentralEmail: doc.messageCentralEmail || '',
-        messageCentralBaseUrl: doc.messageCentralBaseUrl || 'https://cpaas.messagecentral.com',
-        messageCentralCountryCode: doc.messageCentralCountryCode || '91',
-        messageCentralOtpLength: doc.messageCentralOtpLength || 4,
-        messageCentralFlowType: doc.messageCentralFlowType || 'SMS',
-        messageCentralAuthTokenSet,
-        messageCentralPasswordSet,
-        // Legacy aliases
-        mcEnabled: !!doc.messageCentralEnabled,
-        mcCustomerId: doc.messageCentralCustomerId || '',
-        mcBaseUrl: doc.messageCentralBaseUrl || 'https://cpaas.messagecentral.com',
-        mcCountryCode: doc.messageCentralCountryCode || '91',
-        mcOtpLength: doc.messageCentralOtpLength || 4,
-        mcFlowType: doc.messageCentralFlowType || 'SMS',
-        mcAuthTokenSet: messageCentralAuthTokenSet,
-        mcPasswordSet: messageCentralPasswordSet,
+        messageCentralEnabled: !!finalDoc?.messageCentralEnabled,
+        messageCentralCustomerId: finalDoc?.messageCentralCustomerId || customerId,
+        messageCentralEmail: finalDoc?.messageCentralEmail || '',
+        messageCentralBaseUrl:
+          finalDoc?.messageCentralBaseUrl || 'https://cpaas.messagecentral.com',
+        messageCentralCountryCode: finalDoc?.messageCentralCountryCode || '91',
+        messageCentralOtpLength: finalDoc?.messageCentralOtpLength || 4,
+        messageCentralFlowType: finalDoc?.messageCentralFlowType || 'SMS',
+        messageCentralAuthTokenSet: !!String(finalDoc?.messageCentralAuthToken || '').trim(),
+        messageCentralPasswordSet: !!finalDoc?.messageCentralPassword,
+        // Legacy aliases for older admin builds
+        mcEnabled: !!finalDoc?.messageCentralEnabled,
+        mcCustomerId: finalDoc?.messageCentralCustomerId || customerId,
+        mcBaseUrl: finalDoc?.messageCentralBaseUrl || 'https://cpaas.messagecentral.com',
+        mcCountryCode: finalDoc?.messageCentralCountryCode || '91',
+        mcOtpLength: finalDoc?.messageCentralOtpLength || 4,
+        mcFlowType: finalDoc?.messageCentralFlowType || 'SMS',
+        mcAuthTokenSet: !!String(finalDoc?.messageCentralAuthToken || '').trim(),
+        mcPasswordSet: !!finalDoc?.messageCentralPassword,
+        debug: {
+          receivedTokenLen: authToken.length,
+          savedTokenLen: String(finalDoc?.messageCentralAuthToken || '').length,
+        },
       },
     });
   } catch (error: any) {
