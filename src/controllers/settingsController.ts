@@ -34,27 +34,26 @@ export const getSettings = async (request: FastifyRequest, reply: FastifyReply) 
       // Not logged in or not an admin
     }
 
-    // Flags for UI (secrets never returned raw to browser — same idea as Tataiya strip)
-    const messageCentralAuthTokenSet = !!(obj as any).messageCentralAuthToken || !!(obj as any).mcAuthToken;
-    const messageCentralPasswordSet = !!(obj as any).messageCentralPassword || !!(obj as any).mcPassword;
-    delete (obj as any).messageCentralAuthToken;
-    delete (obj as any).messageCentralPassword;
-    delete (obj as any).mcAuthToken;
-    delete (obj as any).mcPassword;
-
+    // Admin gets full settings (including MC secrets) — same as Tataiya.
+    // Public GET strips secrets below.
     if (isAdmin) {
       return reply.send({
         success: true,
         data: {
           ...obj,
-          messageCentralAuthTokenSet,
-          messageCentralPasswordSet,
-          // Legacy aliases for older admin builds
-          mcAuthTokenSet: messageCentralAuthTokenSet,
-          mcPasswordSet: messageCentralPasswordSet,
+          messageCentralAuthTokenSet: !!(obj as any).messageCentralAuthToken || !!(obj as any).mcAuthToken,
+          messageCentralPasswordSet: !!(obj as any).messageCentralPassword || !!(obj as any).mcPassword,
+          mcAuthTokenSet: !!(obj as any).messageCentralAuthToken || !!(obj as any).mcAuthToken,
+          mcPasswordSet: !!(obj as any).messageCentralPassword || !!(obj as any).mcPassword,
         },
       });
     }
+
+    // Never send raw secrets to the browser for public
+    delete (obj as any).messageCentralAuthToken;
+    delete (obj as any).messageCentralPassword;
+    delete (obj as any).mcAuthToken;
+    delete (obj as any).mcPassword;
 
     const sensitiveFields = [
       'mailEmail', 'mailDriver', 'mailHost', 'mailPort', 'mailEncryption', 'mailUsername', 'mailPassword', 'mailFrom', 'mailFromName',
@@ -86,83 +85,63 @@ export const getSettings = async (request: FastifyRequest, reply: FastifyReply) 
 
 export const updateSettings = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
-    const body = (request.body || {}) as Record<string, any>;
+    const body = { ...((request.body || {}) as Record<string, any>) };
 
-    // Normalize MC fields to Tataiya names (also accept legacy mc*)
-    const mcSet: Record<string, any> = {};
-    const enabledRaw = body.messageCentralEnabled ?? body.mcEnabled;
-    if (enabledRaw !== undefined) {
-      mcSet.messageCentralEnabled = enabledRaw === true || enabledRaw === 'true';
+    // Normalize legacy mc* → messageCentral*
+    if (body.mcEnabled !== undefined && body.messageCentralEnabled === undefined) {
+      body.messageCentralEnabled = body.mcEnabled === true || body.mcEnabled === 'true';
     }
-    const customerId = body.messageCentralCustomerId ?? body.mcCustomerId;
-    if (typeof customerId === 'string') {
-      mcSet.messageCentralCustomerId = customerId.trim();
+    if (body.mcCustomerId && !body.messageCentralCustomerId) {
+      body.messageCentralCustomerId = String(body.mcCustomerId).trim();
     }
-    const authToken = body.messageCentralAuthToken ?? body.mcAuthToken;
-    if (typeof authToken === 'string') {
-      const t = authToken.replace(/\s+/g, '').trim();
-      if (t) mcSet.messageCentralAuthToken = t;
+    if (body.mcAuthToken && !body.messageCentralAuthToken) {
+      body.messageCentralAuthToken = String(body.mcAuthToken).replace(/\s+/g, '').trim();
     }
-    const password = body.messageCentralPassword ?? body.mcPassword;
-    if (typeof password === 'string') {
-      const p = password.trim();
-      if (p) mcSet.messageCentralPassword = p;
+    if (body.mcPassword && !body.messageCentralPassword) {
+      body.messageCentralPassword = String(body.mcPassword).trim();
     }
-    const email = body.messageCentralEmail ?? body.mcEmail;
-    if (typeof email === 'string') mcSet.messageCentralEmail = email.trim();
-    const baseUrl = body.messageCentralBaseUrl ?? body.mcBaseUrl;
-    if (typeof baseUrl === 'string') {
-      mcSet.messageCentralBaseUrl =
-        baseUrl.trim().replace(/\/$/, '') || 'https://cpaas.messagecentral.com';
+    if (body.mcEmail !== undefined && body.messageCentralEmail === undefined) {
+      body.messageCentralEmail = String(body.mcEmail || '').trim();
     }
-    const country = body.messageCentralCountryCode ?? body.mcCountryCode;
-    if (typeof country === 'string') {
-      mcSet.messageCentralCountryCode = country.trim().replace(/^\+/, '') || '91';
+    if (body.mcBaseUrl && !body.messageCentralBaseUrl) {
+      body.messageCentralBaseUrl = String(body.mcBaseUrl).trim().replace(/\/$/, '');
     }
-    const otpLen = body.messageCentralOtpLength ?? body.mcOtpLength;
-    if (otpLen !== undefined) {
-      mcSet.messageCentralOtpLength = Math.min(8, Math.max(4, Number(otpLen) || 4));
+    if (body.mcCountryCode && !body.messageCentralCountryCode) {
+      body.messageCentralCountryCode = String(body.mcCountryCode).replace(/^\+/, '');
     }
-    const flow = body.messageCentralFlowType ?? body.mcFlowType;
-    if (typeof flow === 'string') {
-      mcSet.messageCentralFlowType = flow.trim().toUpperCase() || 'SMS';
+    if (body.mcOtpLength !== undefined && body.messageCentralOtpLength === undefined) {
+      body.messageCentralOtpLength = Math.min(8, Math.max(4, Number(body.mcOtpLength) || 4));
+    }
+    if (body.mcFlowType && !body.messageCentralFlowType) {
+      body.messageCentralFlowType = String(body.mcFlowType).toUpperCase();
     }
 
-    const $set: Record<string, any> = { ...body, ...mcSet };
-    delete $set.messageCentralAuthTokenSet;
-    delete $set.messageCentralPasswordSet;
-    delete $set.mcAuthTokenSet;
-    delete $set.mcPasswordSet;
-    delete $set._id;
-    delete $set.__v;
-    // Don't blank secrets / don't write legacy mc* keys from body
+    if (typeof body.messageCentralAuthToken === 'string') {
+      body.messageCentralAuthToken = body.messageCentralAuthToken.replace(/\s+/g, '').trim();
+    }
+    // Don't blank existing secrets
+    if (!body.messageCentralAuthToken) delete body.messageCentralAuthToken;
+    if (!body.messageCentralPassword) delete body.messageCentralPassword;
+
+    delete body.messageCentralAuthTokenSet;
+    delete body.messageCentralPasswordSet;
+    delete body.mcAuthTokenSet;
+    delete body.mcPasswordSet;
+    delete body._id;
+    delete body.__v;
     for (const k of [
-      'messageCentralAuthToken', 'messageCentralPassword',
-      'mcAuthToken', 'mcPassword', 'mcEnabled', 'mcCustomerId', 'mcEmail',
+      'mcEnabled', 'mcCustomerId', 'mcAuthToken', 'mcPassword', 'mcEmail',
       'mcBaseUrl', 'mcCountryCode', 'mcOtpLength', 'mcFlowType',
     ]) {
-      if ($set[k] === '') delete $set[k];
-    }
-    // Prefer only Tataiya keys in $set from mcSet merge
-    delete $set.mcAuthToken;
-    delete $set.mcPassword;
-    delete $set.mcEnabled;
-    delete $set.mcCustomerId;
-    delete $set.mcEmail;
-    delete $set.mcBaseUrl;
-    delete $set.mcCountryCode;
-    delete $set.mcOtpLength;
-    delete $set.mcFlowType;
-
-    const col = SettingsModel.collection;
-    const existingCount = await col.countDocuments();
-    if (existingCount === 0) {
-      await col.insertOne({ ...$set, createdAt: new Date(), updatedAt: new Date() });
-    } else {
-      await col.updateMany({}, { $set: { ...$set, updatedAt: new Date() } });
+      delete body[k];
     }
 
-    const settings = await col.findOne({}, { sort: { updatedAt: -1 } }) as any;
+    // Tataiya-style upsert — strict:false so Message Gateway fields always persist
+    const settings = await SettingsModel.findOneAndUpdate(
+      {},
+      { $set: body },
+      { new: true, upsert: true, setDefaultsOnInsert: true, strict: false }
+    );
 
     const envUpdates: Record<string, string> = {};
     if (body.mailHost !== undefined)     envUpdates.EMAIL_HOST     = body.mailHost;
@@ -180,27 +159,17 @@ export const updateSettings = async (request: FastifyRequest, reply: FastifyRepl
     if (body.awsRegion !== undefined) envUpdates.AWS_S3_REGION = body.awsRegion;
     if (body.awsBucket !== undefined) envUpdates.AWS_S3_BUCKET_NAME = body.awsBucket;
     if (body.awsCdnUrl !== undefined) envUpdates.AWS_S3_PUBLIC_BASE_URL = body.awsCdnUrl;
+    if (Object.keys(envUpdates).length > 0) updateEnvFile(envUpdates);
 
-    if (Object.keys(envUpdates).length > 0) {
-      updateEnvFile(envUpdates);
-    }
-
-    const safe = { ...(settings || {}) } as any;
-    const messageCentralAuthTokenSet = !!safe.messageCentralAuthToken;
-    const messageCentralPasswordSet = !!safe.messageCentralPassword;
-    delete safe.messageCentralAuthToken;
-    delete safe.messageCentralPassword;
-    delete safe.mcAuthToken;
-    delete safe.mcPassword;
-
+    const obj = settings?.toObject ? settings.toObject() : { ...(settings as any) };
     return reply.send({
       success: true,
       data: {
-        ...safe,
-        messageCentralAuthTokenSet,
-        messageCentralPasswordSet,
-        mcAuthTokenSet: messageCentralAuthTokenSet,
-        mcPasswordSet: messageCentralPasswordSet,
+        ...obj,
+        messageCentralAuthTokenSet: !!obj.messageCentralAuthToken,
+        messageCentralPasswordSet: !!obj.messageCentralPassword,
+        mcAuthTokenSet: !!obj.messageCentralAuthToken,
+        mcPasswordSet: !!obj.messageCentralPassword,
       },
     });
   } catch (error: any) {
