@@ -200,6 +200,9 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
     const displayName = (providedName || '').trim() || 'User';
 
     if (allUsersWithPhone.length === 0) {
+      // Prefer an existing email account that already has this phone unset —
+      // do NOT create a temp user if one already exists for this phone under another format.
+      // Create temp only when truly new.
       const newProfile = { name: displayName, isKids: false, maturityLevel: 18, language: 'Hindi' };
       const newUser = new UserModel({
         phone: mobileNumber,

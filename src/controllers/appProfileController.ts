@@ -584,33 +584,30 @@ export const updateAppProfile = async (request: FastifyRequest, reply: FastifyRe
     const userId = getOptionalUserId(request);
     if (!userId) return reply.status(401).send({ success: false, message: 'Unauthorized' });
 
-    const { name, email, avatar, phone } = (request.body || {}) as { name?: string; email?: string; avatar?: string; phone?: string };
+    const { name, email, avatar, phone } = (request.body || {}) as {
+      name?: string;
+      email?: string;
+      avatar?: string;
+      phone?: string;
+    };
 
-    const updateData: any = {};
-    if (name && typeof name === 'string') updateData.name = name.trim();
-    if (email && typeof email === 'string') updateData.email = email.toLowerCase().trim();
-    if (avatar && typeof avatar === 'string') updateData.avatar = avatar;
-    if (phone && typeof phone === 'string') updateData.phone = phone.trim();
-
-    if (Object.keys(updateData).length === 0) {
-      return reply.status(400).send({ success: false, message: 'No fields to update' });
-    }
-
-    let user = await UserModel.findByIdAndUpdate(
-      userId,
-      { $set: updateData },
-      { new: true, runValidators: true }
-    ).lean();
-
-    if (!user) {
+    const current = await UserModel.findById(userId);
+    if (!current) {
+      // Admin path (unchanged)
+      const updateData: any = {};
+      if (name && typeof name === 'string') updateData.name = name.trim();
+      if (email && typeof email === 'string') updateData.email = email.toLowerCase().trim();
+      if (avatar && typeof avatar === 'string') updateData.avatar = avatar;
+      if (phone && typeof phone === 'string') updateData.phone = phone.trim();
+      if (Object.keys(updateData).length === 0) {
+        return reply.status(400).send({ success: false, message: 'No fields to update' });
+      }
       const admin = await AdminUserModel.findByIdAndUpdate(
         userId,
         { $set: updateData },
         { new: true, runValidators: true }
       ).lean();
-
       if (!admin) return reply.status(404).send({ success: false, message: 'User not found' });
-
       return reply.send({
         success: true,
         data: {
@@ -623,6 +620,121 @@ export const updateAppProfile = async (request: FastifyRequest, reply: FastifyRe
       });
     }
 
+    const nextName = name && typeof name === 'string' ? name.trim() : undefined;
+    const nextEmail =
+      email && typeof email === 'string' ? email.toLowerCase().trim() : undefined;
+    const nextAvatar = avatar && typeof avatar === 'string' ? avatar : undefined;
+    const nextPhone =
+      phone && typeof phone === 'string'
+        ? String(phone).replace(/\D/g, '').slice(-10)
+        : undefined;
+
+    // If linking a real email that already has an account → merge into that account
+    // (common: OTP created 830…@temp.local, user pastes subscribed Gmail)
+    if (nextEmail && nextEmail !== String(current.email || '').toLowerCase()) {
+      const existing = await UserModel.findOne({
+        email: nextEmail,
+        _id: { $ne: current._id },
+      });
+
+      if (existing) {
+        const currentIsTemp = String(current.email || '').endsWith('@temp.local');
+        if (!currentIsTemp) {
+          return reply.status(400).send({
+            success: false,
+            message:
+              'This email is already registered to another account. Log in with that email, or use a different email.',
+          });
+        }
+
+        // Merge temp OTP user → existing subscribed account
+        const phoneToKeep =
+          nextPhone ||
+          String((existing as any).phone || '').replace(/\D/g, '').slice(-10) ||
+          String((current as any).phone || '').replace(/\D/g, '').slice(-10);
+
+        if (phoneToKeep) {
+          (existing as any).phone = phoneToKeep;
+          // Clear phone on any other docs to avoid unique conflicts if any
+          await UserModel.updateMany(
+            { _id: { $ne: existing._id }, phone: { $in: [phoneToKeep, `91${phoneToKeep}`, `+91${phoneToKeep}`] } },
+            { $unset: { phone: 1 } }
+          );
+        }
+        if (nextName && (existing.name === 'User' || !existing.name)) {
+          existing.name = nextName;
+        }
+        if (nextAvatar && !(existing as any).avatar) {
+          (existing as any).avatar = nextAvatar;
+        }
+        // Prefer keeping existing subscription fields as-is
+        existing.lastLogin = new Date();
+        await existing.save();
+
+        const tempId = current._id;
+        // Reassign lightweight related data to the real account
+        await Promise.all([
+          UserWishlistModel.updateMany({ userId: tempId }, { $set: { userId: existing._id } }),
+          UserLikeModel.updateMany({ userId: tempId }, { $set: { userId: existing._id } }),
+          UserDownloadModel.updateMany({ userId: tempId }, { $set: { userId: existing._id } }),
+          UserWatchProgressModel.updateMany({ userId: tempId }, { $set: { userId: existing._id } }),
+        ]);
+        await UserModel.findByIdAndDelete(tempId);
+
+        const server = request.server as any;
+        const accessToken = server.jwt.sign(
+          {
+            id: existing._id.toString(),
+            name: existing.name,
+            phone: (existing as any).phone,
+            role: 'user',
+            deviceId: 'unknown',
+          },
+          { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '7d' }
+        );
+
+        logger.info(
+          { from: String(tempId), to: String(existing._id), email: nextEmail },
+          'Merged temp OTP account into existing email account'
+        );
+
+        return reply.send({
+          success: true,
+          merged: true,
+          accessToken,
+          message: 'Linked to your existing account with subscription.',
+          data: {
+            id: existing._id.toString(),
+            name: existing.name,
+            email: existing.email,
+            avatar: (existing as any).avatar || null,
+            phone: (existing as any).phone || null,
+            subscriptionPlan: (existing as any).subscriptionPlan || 'free',
+            subscriptionStatus: (existing as any).subscriptionStatus || 'inactive',
+            subscriptionExpiry: (existing as any).subscriptionExpiry || null,
+          },
+        });
+      }
+    }
+
+    const updateData: any = {};
+    if (nextName) updateData.name = nextName;
+    if (nextEmail) updateData.email = nextEmail;
+    if (nextAvatar) updateData.avatar = nextAvatar;
+    if (nextPhone) updateData.phone = nextPhone;
+
+    if (Object.keys(updateData).length === 0) {
+      return reply.status(400).send({ success: false, message: 'No fields to update' });
+    }
+
+    const user = await UserModel.findByIdAndUpdate(
+      userId,
+      { $set: updateData },
+      { new: true, runValidators: true }
+    ).lean();
+
+    if (!user) return reply.status(404).send({ success: false, message: 'User not found' });
+
     return reply.send({
       success: true,
       data: {
@@ -631,12 +743,18 @@ export const updateAppProfile = async (request: FastifyRequest, reply: FastifyRe
         email: user.email,
         avatar: (user as any).avatar || null,
         phone: (user as any).phone || null,
+        subscriptionPlan: (user as any).subscriptionPlan || 'free',
+        subscriptionStatus: (user as any).subscriptionStatus || 'inactive',
+        subscriptionExpiry: (user as any).subscriptionExpiry || null,
       },
     });
   } catch (error: any) {
     logger.error({ error }, 'Error updating app profile');
     if (error.code === 11000) {
-      return reply.status(400).send({ success: false, message: 'This email or phone number is already registered to another account.' });
+      return reply.status(400).send({
+        success: false,
+        message: 'This email or phone number is already registered to another account.',
+      });
     }
     return reply.status(500).send({ success: false, message: 'Failed to update profile' });
   }
