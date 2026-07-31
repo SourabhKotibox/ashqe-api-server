@@ -122,6 +122,8 @@ function extractVerificationId(data: any): string {
       data?.verificationId ||
       data?.data?.verification_id ||
       data?.data?.verificationID ||
+      data?.data?.transactionId ||
+      data?.transactionId ||
       ''
   ).trim();
 }
@@ -238,19 +240,35 @@ export class MessageCentralService {
       let { res, data } = await doSend(token);
 
       // Expired console token → refresh via password if possible
-      if (this.isUnauthorized(res, data) && cfg.password) {
-        this.cachedToken = null;
-        token = await this.getAuthToken(cfg, true);
-        ({ res, data } = await doSend(token));
+      if (this.isUnauthorized(res, data)) {
+        if (cfg.password) {
+          this.cachedToken = null;
+          token = await this.getAuthToken(cfg, true);
+          ({ res, data } = await doSend(token));
+        } else {
+          return {
+            success: false,
+            message:
+              'Auth Token expired or invalid. Paste a fresh token from Message Central, or save Email + Password in SMS / OTP settings so tokens auto-refresh.',
+          };
+        }
       }
 
       const verificationId = extractVerificationId(data);
 
+      // Some MC responses nest differently or use responseCode != 200
       if (!verificationId) {
-        logger.error({ status: res.status, data }, 'MC send OTP failed');
+        const code = Number(data?.responseCode ?? data?.status ?? res.status);
+        logger.error({ status: res.status, code, data }, 'MC send OTP failed');
         return {
           success: false,
-          message: mcErrorMessage(data, res, 'Failed to send OTP'),
+          message: mcErrorMessage(
+            data,
+            res,
+            code && code !== 200
+              ? `Message Central rejected send (code ${code})`
+              : 'Failed to send OTP'
+          ),
         };
       }
 
