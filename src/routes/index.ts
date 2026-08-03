@@ -151,6 +151,21 @@ const router: FastifyPluginAsync = async (fastify) => {
     }
   });
 
+  // videoPlayer redirect for App Links - redirect to Play Store if app not installed
+  fastify.get('/videoPlayer', async (request, reply) => {
+    const { movie_id } = request.query as { movie_id?: string };
+    
+    // Redirect to Play Store
+    const playStoreUrl = 'https://play.google.com/store/apps/details?id=com.ashqe.tophills';
+    
+    // If movie_id exists, pass it as referrer for deep linking after install
+    const redirectUrl = movie_id 
+      ? `${playStoreUrl}&referrer=movie_id%3D${movie_id}`
+      : playStoreUrl;
+    
+    return reply.redirect(302, redirectUrl);
+  });
+
 };
 
 export default router;
