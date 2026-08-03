@@ -542,7 +542,7 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
       success: true,
       message: 'Payment verified and subscription activated successfully',
       subscriptionId: subscription._id,
-      subscriptionPlan: normalizePlanKey(payload.plan),
+      subscriptionPlan: payload.plan || normalizePlanKey(payload.plan), // Return actual plan name
       subscriptionStatus: 'active',
       subscriptionExpiry: payload.endDate,
     });

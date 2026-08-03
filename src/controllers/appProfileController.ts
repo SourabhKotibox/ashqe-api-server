@@ -740,7 +740,7 @@ export const updateAppProfile = async (request: FastifyRequest, reply: FastifyRe
             avatar: (existing as any).avatar || null,
             phone: (existing as any).phone || null,
             subscription: isActive,
-            subscriptionPlan: isActive ? planOut : 'free',
+            subscriptionPlan: isActive ? ((existing as any).subscriptionPlanName || planOut) : 'free',
             subscriptionPlanName: isActive ? ((existing as any).subscriptionPlanName || null) : null, // Return actual plan name from admin panel
             subscriptionStatus: isActive ? 'active' : 'inactive',
             subscriptionExpiry: expiryOut,
@@ -775,7 +775,7 @@ export const updateAppProfile = async (request: FastifyRequest, reply: FastifyRe
         email: user.email,
         avatar: (user as any).avatar || null,
         phone: (user as any).phone || null,
-        subscriptionPlan: (user as any).subscriptionPlan || 'free',
+        subscriptionPlan: (user as any).subscriptionPlanName || (user as any).subscriptionPlan || 'free',
         subscriptionPlanName: (user as any).subscriptionPlanName || null, // Return actual plan name from admin panel
         subscriptionStatus: (user as any).subscriptionStatus || 'inactive',
         subscriptionExpiry: (user as any).subscriptionExpiry || null,
