@@ -19,6 +19,7 @@ export interface IUser extends Document {
   subscriptionStatus: 'active' | 'inactive' | 'cancelled' | 'expired';
   subscriptionExpiry?: Date;
   subscriptionPlanId?: Types.ObjectId;
+  subscriptionPlanName?: string; // Store actual plan name from admin panel
   profiles: IUserProfile[];
   devices: Array<{
     deviceId: string;
@@ -62,6 +63,7 @@ const UserSchema = new Schema<IUser>(
     },
     subscriptionExpiry: Date,
     subscriptionPlanId: { type: Schema.Types.ObjectId, ref: 'SubscriptionPlan' },
+    subscriptionPlanName: String, // Store actual plan name from admin panel
     profiles: [
       {
         name: { type: String, required: true },

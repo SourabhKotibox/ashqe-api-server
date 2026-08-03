@@ -120,13 +120,14 @@ export const getAppProfile = async (request: FastifyRequest, reply: FastifyReply
 
         // Reload healed subscription fields for response expiry / plan id
         const refreshed = await UserModel.findById(userObjectId)
-          .select('subscriptionPlan subscriptionStatus subscriptionExpiry subscriptionPlanId')
+          .select('subscriptionPlan subscriptionStatus subscriptionExpiry subscriptionPlanId subscriptionPlanName')
           .lean();
         if (refreshed) {
           (user as any).subscriptionPlan = refreshed.subscriptionPlan;
           (user as any).subscriptionStatus = refreshed.subscriptionStatus;
           (user as any).subscriptionExpiry = refreshed.subscriptionExpiry;
           (user as any).subscriptionPlanId = refreshed.subscriptionPlanId;
+          (user as any).subscriptionPlanName = refreshed.subscriptionPlanName;
         }
 
         // Calculate user sequential number and dynamically format Display ID
@@ -157,6 +158,8 @@ export const getAppProfile = async (request: FastifyRequest, reply: FastifyReply
           subscription: isActive,
           subscriptionStatus: isActive ? 'active' : 'inactive',
           subscriptionPlan: isActive ? effectivePlan : 'free',
+          subscriptionPlanId: (user as any).subscriptionPlanId || null,
+          subscriptionPlanName: (user as any).subscriptionPlanName || null, // Return actual plan name from admin panel
           subscriptionExpiry: (user as any).subscriptionExpiry || null,
           profileLimitCount,
           videoQuality: user.videoQuality || 'auto',
@@ -680,6 +683,7 @@ export const updateAppProfile = async (request: FastifyRequest, reply: FastifyRe
           (existing as any).subscriptionStatus = 'active';
           (existing as any).subscriptionExpiry = existingLiveSub.endDate || null;
           (existing as any).subscriptionPlanId = existingLiveSub.planId || null;
+          (existing as any).subscriptionPlanName = existingLiveSub.plan || null; // Sync actual plan name from admin panel
         }
 
         existing.lastLogin = new Date();
@@ -737,6 +741,7 @@ export const updateAppProfile = async (request: FastifyRequest, reply: FastifyRe
             phone: (existing as any).phone || null,
             subscription: isActive,
             subscriptionPlan: isActive ? planOut : 'free',
+            subscriptionPlanName: isActive ? ((existing as any).subscriptionPlanName || null) : null, // Return actual plan name from admin panel
             subscriptionStatus: isActive ? 'active' : 'inactive',
             subscriptionExpiry: expiryOut,
           },
@@ -771,6 +776,7 @@ export const updateAppProfile = async (request: FastifyRequest, reply: FastifyRe
         avatar: (user as any).avatar || null,
         phone: (user as any).phone || null,
         subscriptionPlan: (user as any).subscriptionPlan || 'free',
+        subscriptionPlanName: (user as any).subscriptionPlanName || null, // Return actual plan name from admin panel
         subscriptionStatus: (user as any).subscriptionStatus || 'inactive',
         subscriptionExpiry: (user as any).subscriptionExpiry || null,
       },

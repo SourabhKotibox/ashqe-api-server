@@ -98,6 +98,7 @@ export async function resolveEffectiveUserPlan(
           subscriptionStatus: 'active',
           subscriptionExpiry: liveSub.endDate || null,
           subscriptionPlanId: liveSub.planId || null,
+          subscriptionPlanName: liveSub.plan || null, // Sync actual plan name from admin panel
         },
       });
     } catch {

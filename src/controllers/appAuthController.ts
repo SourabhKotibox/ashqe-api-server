@@ -48,11 +48,13 @@ async function resolveSubscriptionPayload(user: any) {
           subscriptionStatus: 'active',
           subscriptionExpiry: liveSub.endDate || null,
           subscriptionPlanId: liveSub.planId || null,
+          subscriptionPlanName: liveSub.plan || null, // Sync actual plan name from admin panel
         },
       });
     }
     return {
       subscriptionPlan: planKey,
+      subscriptionPlanName: liveSub.plan || null, // Return actual plan name from admin panel
       subscriptionStatus: 'active' as const,
       subscriptionExpiry: liveSub.endDate || null,
       subscription: true,
@@ -69,6 +71,7 @@ async function resolveSubscriptionPayload(user: any) {
 
   return {
     subscriptionPlan: active ? plan : 'free',
+    subscriptionPlanName: active ? (user.subscriptionPlanName || null) : null, // Return actual plan name from admin panel
     subscriptionStatus: active ? 'active' : 'inactive',
     subscriptionExpiry: expiry,
     subscription: active,
@@ -476,7 +479,7 @@ export const registerUser = async (request: FastifyRequest, reply: FastifyReply)
 
     const server = request.server as any;
     const accessToken = server.jwt.sign({ id: user._id.toString(), name: user.name, role: 'user' }, { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '7d' });
-    return reply.status(200).send({ success: true, accessToken, userId: user._id.toString(), name: user.name, avatar: user.avatar || null, subscriptionPlan: user.subscriptionPlan || 'free', subscriptionStatus: user.subscriptionStatus || 'inactive', expiresIn: 604800 });
+    return reply.status(200).send({ success: true, accessToken, userId: user._id.toString(), name: user.name, avatar: user.avatar || null, subscriptionPlan: user.subscriptionPlan || 'free', subscriptionPlanName: user.subscriptionPlanName || null, subscriptionStatus: user.subscriptionStatus || 'inactive', expiresIn: 604800 });
   } catch (error) {
     console.error('Register Error:', error);
     return reply.status(500).send({ success: false, message: 'Internal server error' });
@@ -604,7 +607,7 @@ export const googleAuth = async (request: FastifyRequest, reply: FastifyReply) =
 
     const user = await findOrCreateSocialUser(payload.email, payload.name || payload.email.split('@')[0], 'google');
     const accessToken = signUserToken(request, user);
-    return reply.send({ success: true, accessToken, userId: user._id.toString(), name: user.name, subscriptionPlan: user.subscriptionPlan || 'free', subscriptionStatus: user.subscriptionStatus || 'inactive', expiresIn: 604800 });
+    return reply.send({ success: true, accessToken, userId: user._id.toString(), name: user.name, subscriptionPlan: user.subscriptionPlan || 'free', subscriptionPlanName: user.subscriptionPlanName || null, subscriptionStatus: user.subscriptionStatus || 'inactive', expiresIn: 604800 });
   } catch (error) {
     console.error('Google Auth Error:', error);
     return reply.status(500).send({ success: false, message: 'Google authentication failed' });
@@ -663,7 +666,7 @@ export const appleAuth = async (request: FastifyRequest, reply: FastifyReply) =>
 
     const user = await findOrCreateSocialUser(email, name, 'apple');
     const accessToken = signUserToken(request, user);
-    return reply.send({ success: true, accessToken, userId: user._id.toString(), name: user.name, subscriptionPlan: user.subscriptionPlan || 'free', subscriptionStatus: user.subscriptionStatus || 'inactive', expiresIn: 604800 });
+    return reply.send({ success: true, accessToken, userId: user._id.toString(), name: user.name, subscriptionPlan: user.subscriptionPlan || 'free', subscriptionPlanName: user.subscriptionPlanName || null, subscriptionStatus: user.subscriptionStatus || 'inactive', expiresIn: 604800 });
   } catch (error) {
     console.error('Apple Auth Error:', error);
     return reply.status(500).send({ success: false, message: 'Apple authentication failed' });

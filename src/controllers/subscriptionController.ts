@@ -127,6 +127,7 @@ export async function syncUserSubscription(
         subscriptionStatus: stillActive ? 'active' : status === 'cancelled' ? 'cancelled' : 'inactive',
         subscriptionExpiry: stillActive && endDate ? endDate : endDate || null,
         subscriptionPlanId: stillActive && data.planId ? data.planId : null,
+        subscriptionPlanName: stillActive && data.plan ? data.plan : null, // Store actual plan name from admin panel
       },
     },
     { runValidators: true }
