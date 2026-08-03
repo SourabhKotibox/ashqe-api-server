@@ -157,7 +157,7 @@ export const getAppProfile = async (request: FastifyRequest, reply: FastifyReply
           avatar: (user as any).avatar || null,
           subscription: isActive,
           subscriptionStatus: isActive ? 'active' : 'inactive',
-          subscriptionPlan: isActive ? effectivePlan : 'free',
+          subscriptionPlan: isActive ? ((user as any).subscriptionPlanName || effectivePlan) : 'free', // Use actual plan name if available, fallback to tier
           subscriptionPlanId: (user as any).subscriptionPlanId || null,
           subscriptionPlanName: (user as any).subscriptionPlanName || null, // Return actual plan name from admin panel
           subscriptionExpiry: (user as any).subscriptionExpiry || null,

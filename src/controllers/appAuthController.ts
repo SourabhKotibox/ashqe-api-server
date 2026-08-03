@@ -53,7 +53,7 @@ async function resolveSubscriptionPayload(user: any) {
       });
     }
     return {
-      subscriptionPlan: planKey,
+      subscriptionPlan: liveSub.plan || planKey, // Return actual plan name instead of normalized key
       subscriptionPlanName: liveSub.plan || null, // Return actual plan name from admin panel
       subscriptionStatus: 'active' as const,
       subscriptionExpiry: liveSub.endDate || null,
