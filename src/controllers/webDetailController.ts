@@ -1,10 +1,32 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { MovieModel } from '../models/Movie';
 import { logger } from '../lib/logger';
+import {
+  canAccessContent,
+  isContentLocked,
+  isQualityLocked,
+  requiresSubscription,
+  resolveEffectiveUserPlan,
+} from '../lib/subscriptionAccess';
+import { QUALITY_PLAN_GATE } from './watchController';
+
+const getOptionalUserPlan = async (request: FastifyRequest): Promise<string> => {
+  try {
+    const authHeader = request.headers.authorization;
+    if (!authHeader?.startsWith('Bearer ')) return 'free';
+    const server = request.server as any;
+    const decoded = server.jwt.verify(authHeader.slice(7)) as any;
+    if (!decoded?.id) return 'free';
+    return await resolveEffectiveUserPlan(decoded.id);
+  } catch {
+    return 'free';
+  }
+};
 
 export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const { contentId } = request.params as { contentId: string };
+    const userPlan = await getOptionalUserPlan(request);
 
     const item: any = await MovieModel.findById(contentId)
       .populate('genres', 'name')
@@ -29,15 +51,26 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
     const genreNames = (item.genres || []).map((g: any) => g?.name || g);
     const languageNames = (item.languages || []).map((l: any) => l?.name || l);
 
-    // Video settings — never use blob: browser preview URLs
-    const hlsUrl =
+    const contentPlan = item.planRequired || 'free';
+    const contentAccessible = canAccessContent(contentPlan, userPlan);
+
+    // Video settings — never use blob: browser preview URLs; hide streams when locked
+    const rawHlsUrl =
       [item.hlsUrl, item.videoUrl, item.sourceVideoUrl].find(
         (u: any) => typeof u === 'string' && u.trim() && !u.startsWith('blob:')
       ) || '';
+    const hlsUrl = contentAccessible ? rawHlsUrl : '';
     const qualities: any[] = item.videoQualities || [];
     const videoSettings = hlsUrl
       ? [
-          { key: 'auto', label: 'Auto', description: 'Adjusts quality automatically', url: hlsUrl },
+          {
+            key: 'auto',
+            label: 'Auto',
+            description: 'Adjusts quality automatically',
+            url: hlsUrl,
+            requiresPlan: 'free',
+            isLocked: false,
+          },
           ...qualities.map((q: any) => {
             const sizeMB = q.size ? `${Math.round(q.size / (1024 * 1024))} MB` : null;
             const qKey = String(q.quality || '');
@@ -45,13 +78,17 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
               qKey === '4k' || qKey === '2160p' ? '4K' :
               qKey === '1440p' ? '1440p' :
               qKey.replace(/p$/i, 'p');
+            const requiredPlan = QUALITY_PLAN_GATE[qKey] || 'free';
+            const locked = isQualityLocked(requiredPlan, userPlan);
             return {
               key: qKey,
               label,
               description: sizeMB
                 ? `${label} · ~${sizeMB}`
                 : (q.resolution ? `${label} · ${q.resolution}` : `${label} quality`),
-              url: q.url,
+              url: locked ? null : q.url,
+              requiresPlan: requiredPlan,
+              isLocked: locked,
             };
           })
         ]
@@ -112,7 +149,7 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
       videoUrl: hlsUrl || null,
       hlsUrl: hlsUrl || null,
       sourceVideoUrl:
-        item.sourceVideoUrl && !String(item.sourceVideoUrl).startsWith('blob:')
+        contentAccessible && item.sourceVideoUrl && !String(item.sourceVideoUrl).startsWith('blob:')
           ? item.sourceVideoUrl
           : null,
       videoSettings,
@@ -132,8 +169,9 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
       studio: item.studio || null,
       producer: item.producer || null,
       tags: item.tags || [],
-      isLocked: item.planRequired !== 'free',
-      planRequired: item.planRequired || 'free',
+      isLocked: isContentLocked(contentPlan, userPlan),
+      requiresSubscription: requiresSubscription(contentPlan),
+      planRequired: contentPlan,
       downloadAllowed: item.downloadAllowed !== false,
       episodeMeta: `HD • ${genreNames.join(', ')} • ${durationFormatted || 'N/A'}`,
       isExclusive: item.isExclusive || false,

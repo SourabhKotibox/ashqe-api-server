@@ -3,6 +3,11 @@ import mongoose from 'mongoose';
 import { UserWatchProgressModel } from '../models/UserWatchProgress';
 import { MovieModel } from '../models/Movie';
 import { logger } from '../lib/logger';
+import {
+  canAccessContent,
+  isContentLocked,
+  resolveEffectiveUserPlan,
+} from '../lib/subscriptionAccess';
 
 export const saveWatchProgress = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
@@ -162,6 +167,8 @@ export const getWatchHistory = async (request: FastifyRequest, reply: FastifyRep
 
     const total = await UserWatchProgressModel.countDocuments(query);
 
+    const userPlan = await resolveEffectiveUserPlan(userId);
+
     // Format the items 
     const items = history.map((h: any) => {
       // Avoid breaking if content was deleted
@@ -169,13 +176,17 @@ export const getWatchHistory = async (request: FastifyRequest, reply: FastifyRep
 
       // Determine planRequired
       const planRequired: 'free' | 'premium' | 'basic' | 'standard' = h.contentId.planRequired || 'free';
+      const locked = isContentLocked(planRequired, userPlan);
+      const accessible = canAccessContent(planRequired, userPlan);
 
       // Determine isAvailable & status
       const status = h.contentId.status || 'draft';
       const isAvailable = status === 'published';
 
-      // Determine hlsUrl / videoUrl
-      const hlsUrl = h.contentId.hlsUrl || h.contentId.videoUrl || '';
+      // Stream URL only when unlocked for this user
+      const hlsUrl = accessible
+        ? (h.contentId.hlsUrl || h.contentId.videoUrl || '')
+        : '';
 
       return {
         id: h._id.toString(),
@@ -190,6 +201,7 @@ export const getWatchHistory = async (request: FastifyRequest, reply: FastifyRep
         lastWatchedAt: h.lastWatchedAt,
         badge: h.contentId.badge || null,
         planRequired,
+        isLocked: locked,
         isAvailable,
         status,
         hlsUrl,

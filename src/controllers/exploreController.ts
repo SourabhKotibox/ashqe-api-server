@@ -4,6 +4,11 @@ import { UserLikeModel } from '../models/UserLike';
 import { UserModel } from '../models/User';
 import { LanguageModel } from '../models/Language';
 import { logger } from '../lib/logger';
+import {
+  canAccessContent,
+  isContentLocked,
+  resolveEffectiveUserPlan,
+} from '../lib/subscriptionAccess';
 
 // How many extra items to fetch per page to survive deduplication filtering
 const FETCH_MULTIPLIER = 4;
@@ -44,35 +49,43 @@ const mapContentItem = (
   item: any,
   likeCount = 0,
   isLikedByUser = false,
-) => ({
-  id: item._id.toString(),
-  title: item.title,
-  description: item.description,
-  shortDescription: item.shortDescription,
-  thumbnail: toAbsoluteUrl(request, item.thumbnail),
-  bannerImage: toAbsoluteUrl(request, item.bannerImage),
-  type: 'movie',
-  genres: (item.genres || []).map((g: any) => g.name || g),
-  genresText: (item.genres || []).map((g: any) => g.name || g).join(' & '),
-  languages: (item.languages || []).map((l: any) => l.name || l),
-  views: item.views || 0,
-  likeCount,
-  isLikedByUser,
-  shares: item.shares || 0,
-  shareUrl: buildShareUrl(item._id.toString()),
-  featured: item.featured,
-  trending: item.trending,
-  isNewContent: item.isNewContent,
-  rating: item.rating,
-  year: item.year,
-  duration: item.duration,
-  status: item.status,
-  createdAt: item.createdAt,
-  updatedAt: item.updatedAt,
-  videoUrl: toAbsoluteUrl(request, item.hlsUrl) || null,
-  trailerUrl: toAbsoluteUrl(request, item.trailerUrl) || null,
-  contentPlan: item.plan || 'free',
-});
+  userPlan = 'free',
+) => {
+  const contentPlan = item.planRequired || item.plan || 'free';
+  const locked = isContentLocked(contentPlan, userPlan);
+  const accessible = canAccessContent(contentPlan, userPlan);
+  return {
+    id: item._id.toString(),
+    title: item.title,
+    description: item.description,
+    shortDescription: item.shortDescription,
+    thumbnail: toAbsoluteUrl(request, item.thumbnail),
+    bannerImage: toAbsoluteUrl(request, item.bannerImage),
+    type: 'movie',
+    genres: (item.genres || []).map((g: any) => g.name || g),
+    genresText: (item.genres || []).map((g: any) => g.name || g).join(' & '),
+    languages: (item.languages || []).map((l: any) => l.name || l),
+    views: item.views || 0,
+    likeCount,
+    isLikedByUser,
+    shares: item.shares || 0,
+    shareUrl: buildShareUrl(item._id.toString()),
+    featured: item.featured,
+    trending: item.trending,
+    isNewContent: item.isNewContent,
+    rating: item.rating,
+    year: item.year,
+    duration: item.duration,
+    status: item.status,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    videoUrl: accessible ? (toAbsoluteUrl(request, item.hlsUrl) || null) : null,
+    trailerUrl: toAbsoluteUrl(request, item.trailerUrl) || null,
+    contentPlan,
+    planRequired: contentPlan,
+    isLocked: locked,
+  };
+};
 
 // Get explore page data (infinite scroll, movies only)
 export const getExplore = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -94,8 +107,12 @@ export const getExplore = async (request: FastifyRequest, reply: FastifyReply) =
       ? query.seenIds.split(',').map(id => id.trim()).filter(Boolean)
       : [];
 
-    // Optional auth — used for isLikedByUser
+    // Optional auth — used for isLikedByUser + lock gating
     const userId = getOptionalUserId(request);
+    let userPlan = 'free';
+    if (userId) {
+      userPlan = await resolveEffectiveUserPlan(userId);
+    }
 
     let sortBy: any = {};
     let filter: any = { status: 'published' };
@@ -202,7 +219,7 @@ export const getExplore = async (request: FastifyRequest, reply: FastifyReply) =
       const cid = content._id.toString();
       const likeCount: number = content.likes || 0;
       const isLikedByUser: boolean = likedContentIdSet.has(cid);
-      return mapContentItem(request, content, likeCount, isLikedByUser);
+      return mapContentItem(request, content, likeCount, isLikedByUser, userPlan);
     });
 
     // nextOffset moves forward by the full raw fetch batch size (not just unique count)

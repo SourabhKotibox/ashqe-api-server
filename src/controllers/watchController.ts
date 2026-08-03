@@ -4,19 +4,16 @@ import { MovieModel } from '../models/Movie';
 import { UserLikeModel } from '../models/UserLike';
 import { UserWishlistModel } from '../models/UserWishlist';
 import { UserDownloadModel } from '../models/UserDownload';
-import { UserModel } from '../models/User';
 import { UserWatchProgressModel } from '../models/UserWatchProgress';
 import '../models/Actor';
 import '../models/Director';
 import { logger } from '../lib/logger';
-
-// Plan hierarchy
-const PLAN_LEVELS: Record<string, number> = {
-  free: 0,
-  basic: 1,
-  standard: 2,
-  premium: 3,
-};
+import {
+  canAccessContent,
+  isQualityLocked,
+  requiresSubscription,
+  resolveEffectiveUserPlan,
+} from '../lib/subscriptionAccess';
 
 import { buildShareUrl } from '../lib/config';
 
@@ -28,28 +25,12 @@ const getOptionalUser = async (request: FastifyRequest): Promise<{ userId: strin
     const decoded = server.jwt.verify(authHeader.slice(7)) as any;
     if (!decoded?.id) return null;
 
-    const user = await UserModel.findById(decoded.id).select('subscriptionPlan subscriptionStatus subscriptionExpiry').lean();
-    if (!user) return null;
-
     const profileId = request.headers['x-profile-id'] as string | undefined;
-
-    const isActive = user.subscriptionStatus === 'active' && (!user.subscriptionExpiry || user.subscriptionExpiry > new Date());
-    return { userId: decoded.id, userPlan: isActive ? (user.subscriptionPlan || 'free') : 'free', profileId };
+    const userPlan = await resolveEffectiveUserPlan(decoded.id);
+    return { userId: decoded.id, userPlan, profileId };
   } catch {
     return null;
   }
-};
-
-const canAccessItem = (isFree: boolean, isLocked: boolean, contentPlanRequired: string, userPlan: string): boolean => {
-  if (isFree) return true;
-  if (isLocked) {
-    const required = String(contentPlanRequired || 'free').toLowerCase();
-    if (!required || required === 'free') return true;
-    // Any active paid plan unlocks paid content (Standard unlocks premium-tagged titles too)
-    const plan = String(userPlan || 'free').toLowerCase();
-    return !!plan && plan !== 'free';
-  }
-  return true;
 };
 
 // Helper to convert relative URLs to absolute URLs (local storage)
@@ -86,7 +67,7 @@ export const QUALITY_LABELS: Record<string, string> = {
   '2160p': '4K Ultra HD',
 };
 
-// Defines the minimum plan required to stream each quality (for future subscription gating)
+// Minimum plan required to stream each quality
 export const QUALITY_PLAN_GATE: Record<string, string> = {
   '144p':  'free',
   '240p':  'free',
@@ -136,9 +117,7 @@ const buildNamedQualities = (
     const absoluteUrl = toAbsoluteUrl(request, q.url);
     if (!absoluteUrl) continue;
     const requiredPlan = QUALITY_PLAN_GATE[q.quality] || 'free';
-    // isLocked: currently always false — flip to real check when subscriptions go live:
-    // const isLocked = PLAN_LEVELS[userPlan] < PLAN_LEVELS[requiredPlan];
-    const isLocked = false;
+    const locked = isQualityLocked(requiredPlan, userPlan);
     result.push({
       key:          q.quality,
       label:        QUALITY_LABELS[q.quality] || q.quality,
@@ -151,9 +130,9 @@ const buildNamedQualities = (
                     q.quality === '1440p' ? '2K — requires fast connection' :
                     q.quality === '2160p' ? '4K Ultra HD — requires very fast connection' :
                     `Stream at ${QUALITY_LABELS[q.quality] || q.quality}`,
-      url:          absoluteUrl,
+      url:          locked ? null : absoluteUrl,
       requiresPlan: requiredPlan,
-      isLocked,
+      isLocked: locked,
     });
   }
 
@@ -245,7 +224,7 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
     }
 
     // ── Movie Playback ────────────────────────────────────────────────────
-    const isAccessible = canAccessItem(contentPlan === 'free', contentPlan !== 'free', contentPlan, userPlan);
+    const isAccessible = canAccessContent(contentPlan, userPlan);
 
     let watchProgress = null;
     if (userObjectId) {
@@ -264,11 +243,13 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
       id: content._id.toString(),
       title: content.title,
       duration: content.duration || null,
-      isFree: contentPlan === 'free',
+      isFree: String(contentPlan).toLowerCase() === 'free',
       isLocked: !isAccessible,
       hlsUrl: isAccessible ? toAbsoluteUrl(request, content.hlsUrl) : null,
       trailerUrl: toAbsoluteUrl(request, content.trailerUrl),
-      videoSettings: isAccessible ? buildNamedQualities(request, content.hlsUrl, content.videoQualities) : null,
+      videoSettings: isAccessible
+        ? buildNamedQualities(request, content.hlsUrl, content.videoQualities, userPlan)
+        : null,
       watchProgress,
     };
 
@@ -300,6 +281,7 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
           rating: content.rating || null,
           ageRating: content.ageRating || 0,
           planRequired: contentPlan,
+          requiresSubscription: requiresSubscription(contentPlan),
           isExclusive: content.isExclusive || false,
           views: content.views || 0,
           likeCount: content.likes || 0,
@@ -324,7 +306,9 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
         userAccess: {
           isLoggedIn: !!userId,
           userPlan,
+          hasActiveSubscription: userPlan !== 'free',
           canAccessCurrentEpisode: !currentVideo.isLocked,
+          requiresSubscription: requiresSubscription(contentPlan),
         },
       },
     });

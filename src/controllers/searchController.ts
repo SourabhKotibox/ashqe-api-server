@@ -5,6 +5,10 @@ import { LanguageModel } from '../models/Language';
 import { GenreModel } from '../models/Genre';
 import { logger } from '../lib/logger';
 import mongoose from 'mongoose';
+import {
+  isContentLocked,
+  resolveEffectiveUserPlan,
+} from '../lib/subscriptionAccess';
 
 // Helper: try to extract userId from JWT (optional auth)
 const getOptionalUserId = (request: FastifyRequest): string | null => {
@@ -21,26 +25,31 @@ const getOptionalUserId = (request: FastifyRequest): string | null => {
 };
 
 // Unified item mapper
-const mapSearchItem = (item: any) => ({
-  id: item._id.toString(),
-  title: item.title,
-  description: item.description,
-  shortDescription: item.shortDescription,
-  thumbnail: item.thumbnail,
-  bannerImage: item.bannerImage,
-  posterImage: item.posterImage || item.thumbnail || null,
-  type: 'movie',
-  contentPlan: item.planRequired || 'free',
-  views: item.views || 0,
-  rating: item.rating,
-  year: item.year,
-  duration: item.duration,
-  status: item.status,
-  createdAt: item.createdAt,
-  updatedAt: item.updatedAt,
-});
+const mapSearchItem = (item: any, userPlan = 'free') => {
+  const contentPlan = item.planRequired || 'free';
+  return {
+    id: item._id.toString(),
+    title: item.title,
+    description: item.description,
+    shortDescription: item.shortDescription,
+    thumbnail: item.thumbnail,
+    bannerImage: item.bannerImage,
+    posterImage: item.posterImage || item.thumbnail || null,
+    type: 'movie',
+    contentPlan,
+    planRequired: contentPlan,
+    isLocked: isContentLocked(contentPlan, userPlan),
+    views: item.views || 0,
+    rating: item.rating,
+    year: item.year,
+    duration: item.duration,
+    status: item.status,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+  };
+};
 
-export const getRecommendations = async (preferredLanguage: string) => {
+export const getRecommendations = async (preferredLanguage: string, userPlan = 'free') => {
   // Resolve language ID for movies
   let targetLanguageId: mongoose.Types.ObjectId | null = null;
   if (preferredLanguage) {
@@ -58,7 +67,7 @@ export const getRecommendations = async (preferredLanguage: string) => {
     .limit(12)
     .lean();
 
-  const recommendationsList = recMovies.map(m => mapSearchItem(m));
+  const recommendationsList = recMovies.map(m => mapSearchItem(m, userPlan));
 
   // Sort recommendations by views to make them look uniform
   recommendationsList.sort((a, b) => b.views - a.views);
@@ -73,10 +82,17 @@ export const getSearchPage = async (request: FastifyRequest, reply: FastifyReply
 
     const userId = getOptionalUserId(request);
 
-    // Get user's preferred language (defaulting to Hindi if skipped/not set)
+    // Get user's preferred language + REAL active plan
     let preferredLanguage = 'Hindi';
+    let userPlan = 'free';
     if (userId) {
-      const user = await UserModel.findById(userId).select('preferredLanguage languageSelectionSkipped').lean();
+      const [plan, user] = await Promise.all([
+        resolveEffectiveUserPlan(userId),
+        UserModel.findById(userId)
+          .select('preferredLanguage languageSelectionSkipped')
+          .lean(),
+      ]);
+      userPlan = plan;
       if (user) {
         if (user.preferredLanguage) {
           preferredLanguage = user.preferredLanguage;
@@ -101,7 +117,7 @@ export const getSearchPage = async (request: FastifyRequest, reply: FastifyReply
       popularMovies.forEach(m => trendingSearchesSet.add(m.title));
       const trendingSearches = Array.from(trendingSearchesSet).slice(0, 6);
 
-      const recommendations = await getRecommendations(preferredLanguage);
+      const recommendations = await getRecommendations(preferredLanguage, userPlan);
 
       return reply.send({
         success: true,
@@ -153,13 +169,13 @@ export const getSearchPage = async (request: FastifyRequest, reply: FastifyReply
       .limit(20)
       .lean();
 
-    const results = matchedMovies.map(m => mapSearchItem(m));
+    const results = matchedMovies.map(m => mapSearchItem(m, userPlan));
 
     // Sort search results by views/popularity
     results.sort((a, b) => b.views - a.views);
 
     if (results.length === 0) {
-      const recommendations = await getRecommendations(preferredLanguage);
+      const recommendations = await getRecommendations(preferredLanguage, userPlan);
       return reply.send({
         success: true,
         data: {

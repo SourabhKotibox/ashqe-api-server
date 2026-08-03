@@ -213,7 +213,7 @@ export const saveFileFromPart = async (
           inferPreset(part.filename, options?.source, uploadType)
         );
         if (!optimized.skipped) {
-          buffer = optimized.buffer;
+          buffer = Buffer.from(optimized.buffer);
           mimeType = optimized.mimeType;
           finalKey = finalKey.replace(/\.[^.]+$/, '') + optimized.extension;
           displayName = path.basename(finalKey);

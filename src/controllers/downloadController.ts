@@ -6,6 +6,7 @@ import { UserDownloadModel } from '../models/UserDownload';
 import { SubscriptionPlanModel } from '../models/SubscriptionPlan';
 import { PlanLimitModel } from '../models/PlanLimit';
 import { logger } from '../lib/logger';
+import { resolveEffectiveUserPlan } from '../lib/subscriptionAccess';
 
 // Helper to format bytes to MB
 const formatSizeMB = (sizeBytes: number): string => {
@@ -84,14 +85,10 @@ const pickDownloadUrl = (movie: any, request: FastifyRequest): string => {
   return '';
 };
 
-async function resolveDownloadLimits(user: any): Promise<{ allowed: boolean; max: number; reason?: string }> {
-  const planName = String(user.subscriptionPlan || 'free');
-  const isActive =
-    user.subscriptionStatus === 'active' &&
-    (!user.subscriptionExpiry || new Date(user.subscriptionExpiry) > new Date()) &&
-    planName.toLowerCase() !== 'free';
-
-  if (!isActive) {
+async function resolveDownloadLimits(userId: string): Promise<{ allowed: boolean; max: number; reason?: string }> {
+  // Real active plan from Subscription collection
+  const planName = await resolveEffectiveUserPlan(userId);
+  if (planName === 'free') {
     return { allowed: false, max: 0, reason: 'Active subscription required to download content.' };
   }
 
@@ -129,7 +126,7 @@ export const requestDownload = async (request: FastifyRequest, reply: FastifyRep
       return reply.status(404).send({ success: false, message: 'User not found' });
     }
 
-    const limits = await resolveDownloadLimits(user);
+    const limits = await resolveDownloadLimits(userId);
     if (!limits.allowed) {
       return reply.status(403).send({ success: false, message: limits.reason || 'Downloads not allowed' });
     }

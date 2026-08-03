@@ -6,6 +6,7 @@ import { UserModel } from '../models/User';
 import { SubscriptionPlanModel } from '../models/SubscriptionPlan';
 import { PlanLimitModel } from '../models/PlanLimit';
 import { logger } from '../lib/logger';
+import { resolveEffectiveUserPlan } from '../lib/subscriptionAccess';
 
 const toAbsoluteUrl = (
   request: FastifyRequest,
@@ -93,19 +94,17 @@ const pickDownloadUrl = (movie: any, request: FastifyRequest): string => {
 };
 
 const userCanDownload = async (userId: string): Promise<{ ok: boolean; message?: string }> => {
+  // Real active plan from Subscription collection
+  const planName = await resolveEffectiveUserPlan(userId);
+  const isActive = planName !== 'free';
+
   const user = await UserModel.findById(userId)
-    .select('subscriptionStatus subscriptionExpiry subscriptionPlan subscriptionPlanId')
+    .select('subscriptionPlanId')
     .lean();
   if (!user) return { ok: false, message: 'User not found' };
 
-  const isActive =
-    user.subscriptionStatus === 'active' &&
-    (!user.subscriptionExpiry || user.subscriptionExpiry > new Date());
-
-  // Free users: allow download only if a free plan limit enables it (usually false)
   let planId = user.subscriptionPlanId;
   if (!planId) {
-    const planName = isActive ? user.subscriptionPlan || 'free' : 'free';
     const plan = await SubscriptionPlanModel.findOne({
       name: new RegExp(`^${planName}$`, 'i'),
       status: true,
@@ -122,7 +121,7 @@ const userCanDownload = async (userId: string): Promise<{ ok: boolean; message?:
       };
     }
     if (lim && lim.downloadStatus === true) {
-      if (!isActive && (user.subscriptionPlan || 'free') !== 'free') {
+      if (!isActive) {
         return { ok: false, message: 'Active subscription required to download.' };
       }
       return { ok: true };
@@ -130,9 +129,8 @@ const userCanDownload = async (userId: string): Promise<{ ok: boolean; message?:
   }
 
   // Fallback by plan tier: standard/premium can download when active
-  const plan = (user.subscriptionPlan || 'free').toLowerCase();
-  if (isActive && (plan === 'standard' || plan === 'premium')) return { ok: true };
-  if (plan === 'free') {
+  if (isActive && (planName === 'standard' || planName === 'premium')) return { ok: true };
+  if (planName === 'free') {
     // Allow free-tier download when movie is free + downloadAllowed (soft open for demos)
     return { ok: true };
   }

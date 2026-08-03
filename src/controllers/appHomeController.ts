@@ -9,6 +9,12 @@ import { UserWatchProgressModel } from '../models/UserWatchProgress';
 import { AppSettingModel } from '../models/AppSetting';
 import { logger } from '../lib/logger';
 import mongoose from 'mongoose';
+import {
+  canAccessContent,
+  isContentLocked,
+  requiresSubscription,
+  resolveEffectiveUserPlan,
+} from '../lib/subscriptionAccess';
 
 // Base URL for the backend API (used for smart share links)
 import { buildShareUrl } from '../lib/config';
@@ -29,20 +35,18 @@ const buildUrlResolver = (request: FastifyRequest) =>
   };
 
 // Helper: try to extract userId from JWT (optional auth — no error if missing/invalid)
-const getAuthData = (request: FastifyRequest): { userId: string | null; profileId: string | null; userPlan: string } => {
+const getAuthData = (request: FastifyRequest): { userId: string | null; profileId: string | null } => {
   let userId = null;
   let profileId = (request.headers['x-profile-id'] as string) || null;
-  let userPlan = 'free';
   try {
     const authHeader = request.headers.authorization;
     if (authHeader?.startsWith('Bearer ')) {
       const server = request.server as any;
       const decoded = server.jwt.verify(authHeader.slice(7)) as any;
       userId = decoded?.id || null;
-      userPlan = decoded?.plan || 'free';
     }
   } catch {}
-  return { userId, profileId, userPlan };
+  return { userId, profileId };
 };
 
 // Helper function to map movie items — resolveUrl converts all image/video paths to full URLs
@@ -51,36 +55,46 @@ const mapContentItem = (
   resolveUrl: (url: string | null | undefined) => string | null,
   likeCount = 0,
   isLikedByUser = false,
-) => ({
-  id: item._id.toString(),
-  title: item.title,
-  description: item.description,
-  shortDescription: item.shortDescription,
-  thumbnail: resolveUrl(item.thumbnail),
-  bannerImage: resolveUrl(item.bannerImage),
-  posterImage: resolveUrl(item.posterImage),
-  type: 'movie',
-  genres: (item.genres || []).map((g: any) => g.name || g),
-  genresText: (item.genres || []).map((g: any) => g.name || g).join(' & '),
-  languages: (item.languages || []).map((l: any) => l.name || l),
-  views: item.views || 0,
-  likeCount,
-  isLikedByUser,
-  shares: item.shares || 0,
-  shareUrl: buildShareUrl(item._id.toString()),
-  featured: item.featured,
-  trending: item.trending,
-  isNewContent: item.isNewContent,
-  rating: item.rating,
-  year: item.year,
-  duration: item.duration,
-  status: item.status,
-  createdAt: item.createdAt,
-  updatedAt: item.updatedAt,
-  videoUrl: resolveUrl(item.hlsUrl || null),
-  trailerUrl: resolveUrl(item.trailerUrl || null),
-  contentPlan: item.planRequired || item.plan || 'free',
-});
+  userPlan = 'free',
+) => {
+  const contentPlan = item.planRequired || item.plan || 'free';
+  const locked = isContentLocked(contentPlan, userPlan);
+  const accessible = canAccessContent(contentPlan, userPlan);
+  return {
+    id: item._id.toString(),
+    title: item.title,
+    description: item.description,
+    shortDescription: item.shortDescription,
+    thumbnail: resolveUrl(item.thumbnail),
+    bannerImage: resolveUrl(item.bannerImage),
+    posterImage: resolveUrl(item.posterImage),
+    type: 'movie',
+    genres: (item.genres || []).map((g: any) => g.name || g),
+    genresText: (item.genres || []).map((g: any) => g.name || g).join(' & '),
+    languages: (item.languages || []).map((l: any) => l.name || l),
+    views: item.views || 0,
+    likeCount,
+    isLikedByUser,
+    shares: item.shares || 0,
+    shareUrl: buildShareUrl(item._id.toString()),
+    featured: item.featured,
+    trending: item.trending,
+    isNewContent: item.isNewContent,
+    rating: item.rating,
+    year: item.year,
+    duration: item.duration,
+    status: item.status,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    // Full stream only when user can access; trailer always allowed
+    videoUrl: accessible ? resolveUrl(item.hlsUrl || null) : null,
+    trailerUrl: resolveUrl(item.trailerUrl || null),
+    contentPlan,
+    planRequired: contentPlan,
+    requiresSubscription: requiresSubscription(contentPlan),
+    isLocked: locked,
+  };
+};
 
 const populateBannersContent = async (banners: any[]) => {
   const contentIds = banners.map((b) => b.contentId).filter(Boolean);
@@ -113,6 +127,7 @@ const mapBanner = (
   resolveUrl: (url: string | null | undefined) => string | null,
   likeCount = 0,
   isLikedByUser = false,
+  userPlan = 'free',
 ) => {
   const content = banner.contentId;
   const thumbnail = resolveUrl(content?.thumbnail || banner.imageUrl);
@@ -127,7 +142,7 @@ const mapBanner = (
     ctaText: banner.ctaText,
     ctaLink: banner.ctaLink,
     contentId: banner.contentId?._id?.toString(),
-    content: content ? mapContentItem(content, resolveUrl, likeCount, isLikedByUser) : undefined,
+    content: content ? mapContentItem(content, resolveUrl, likeCount, isLikedByUser, userPlan) : undefined,
     type: banner.type,
     contentType: banner.contentType,
     position: banner.position,
@@ -159,10 +174,18 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
     // Build URL resolver (local storage)
     const resolveUrl = buildUrlResolver(request);
 
+    // Resolve REAL active plan from Subscription collection (not stale JWT/user fields)
+    let userPlan = 'free';
     // Get user's preferred language (defaulting to Hindi if skipped/not set)
     let preferredLanguage = 'Hindi';
     if (userId) {
-      const user = await UserModel.findById(userId).select('preferredLanguage languageSelectionSkipped').lean();
+      const [plan, user] = await Promise.all([
+        resolveEffectiveUserPlan(userId),
+        UserModel.findById(userId)
+          .select('preferredLanguage languageSelectionSkipped')
+          .lean(),
+      ]);
+      userPlan = plan;
       if (user) {
         if (user.preferredLanguage) {
           preferredLanguage = user.preferredLanguage;
@@ -307,7 +330,7 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
         const cid = item._id.toString();
         const likeCount = item.likes || 0;
         const isLikedByUser = likedContentIdSet.has(cid);
-        return mapContentItem(item, resolveUrl, likeCount, isLikedByUser);
+        return mapContentItem(item, resolveUrl, likeCount, isLikedByUser, userPlan);
       }),
     }));
 
@@ -328,7 +351,7 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
         const likeCount = item.likes || 0;
         const isLikedByUser = likedContentIdSet.has(cid);
 
-        const mapped: any = mapContentItem(item, resolveUrl, likeCount, isLikedByUser);
+        const mapped: any = mapContentItem(item, resolveUrl, likeCount, isLikedByUser, userPlan);
 
         // Inject watch progress detail
         mapped.watchProgress = {
@@ -408,6 +431,10 @@ export const getAppBanners = async (request: FastifyRequest, reply: FastifyReply
     const banners = await populateBannersContent(bannersRaw);
 
     const { userId } = getAuthData(request);
+    let userPlan = 'free';
+    if (userId) {
+      userPlan = await resolveEffectiveUserPlan(userId);
+    }
     const allContentIds = banners
       .filter(b => b.contentId)
       .map(b => new mongoose.Types.ObjectId((b.contentId as any)._id.toString()));
@@ -420,11 +447,11 @@ export const getAppBanners = async (request: FastifyRequest, reply: FastifyReply
     }
 
     const mappedBanners = banners.map(banner => {
-      if (!banner.contentId) return mapBanner(banner, resolveUrl);
+      if (!banner.contentId) return mapBanner(banner, resolveUrl, 0, false, userPlan);
       const cid = (banner.contentId as any)._id.toString();
       const likeCount = (banner.contentId as any).likes || 0;
       const isLikedByUser = likedContentIdSet.has(cid);
-      return mapBanner(banner, resolveUrl, likeCount, isLikedByUser);
+      return mapBanner(banner, resolveUrl, likeCount, isLikedByUser, userPlan);
     });
 
     return reply.send({

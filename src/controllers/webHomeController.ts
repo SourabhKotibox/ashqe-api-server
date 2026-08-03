@@ -3,6 +3,7 @@ import { MovieModel } from '../models/Movie';
 import { GenreModel } from '../models/Genre';
 import { BannerModel } from '../models/Banner';
 import { logger } from '../lib/logger';
+import { isContentLocked } from '../lib/subscriptionAccess';
 
 const S3_PUBLIC_BASE =
   (process.env.AWS_S3_PUBLIC_BASE_URL || 'https://ashqe-bucket-v1.s3.ap-south-1.amazonaws.com').replace(/\/$/, '');
@@ -45,6 +46,7 @@ const formatDuration = (duration: any): string => {
 
 
 // Standardized mapping for website ContentItem
+// Public/cached home: never expose full streams for paid titles (watch/detail APIs gate those).
 const mapContentItem = (item: any, isHero = false) => {
   let badge;
   if (item.featured && item.trending) badge = 'EXCLUSIVE';
@@ -52,6 +54,12 @@ const mapContentItem = (item: any, isHero = false) => {
   else if (item.featured) badge = 'TOP';
   else if (item.isNewContent) badge = 'NEW';
   else if (item.views > 1000) badge = 'HOT';
+
+  const planRequired = item.planRequired || 'free';
+  const locked = isContentLocked(planRequired, 'free'); // guest-safe list payload
+  const stream = locked
+    ? null
+    : (resolveMediaUrl(item.hlsUrl || item.videoUrl || '') || null);
 
   return {
     id: item._id.toString(),
@@ -70,10 +78,11 @@ const mapContentItem = (item: any, isHero = false) => {
     badge,
     genres: (item.genres || []).map((g: any) => g?.name || g),
     trailerUrl: resolveMediaUrl(item.trailerUrl || '') || null,
-    hlsUrl: resolveMediaUrl(item.hlsUrl || item.videoUrl || '') || null,
-    videoUrl: resolveMediaUrl(item.videoUrl || item.hlsUrl || '') || null,
-    planRequired: item.planRequired || 'free',
-    isPremium: item.planRequired && item.planRequired !== 'free',
+    hlsUrl: stream,
+    videoUrl: stream,
+    planRequired,
+    isPremium: planRequired !== 'free',
+    isLocked: locked,
     trending: !!item.trending,
     isNewContent: !!item.isNewContent,
     views: item.views || 0,
@@ -121,6 +130,11 @@ export const getWebHome = async (request: FastifyRequest, reply: FastifyReply) =
           const content = banner.contentId ? contentMap.get(banner.contentId.toString()) : null;
           const bannerImage = resolveMediaUrl(banner.imageUrl || '');
           if (content) {
+            const planRequired = content.planRequired || 'free';
+            const locked = isContentLocked(planRequired, 'free');
+            const stream = locked
+              ? null
+              : (resolveMediaUrl(content.hlsUrl || content.videoUrl || '') || null);
             return {
               id: content._id.toString(),
               title: banner.title || content.title,
@@ -139,10 +153,11 @@ export const getWebHome = async (request: FastifyRequest, reply: FastifyReply) =
               badge: banner.type?.toUpperCase() || 'EXCLUSIVE',
               genres: (content.genres || []).map((g: any) => g?.name || g),
               trailerUrl: resolveMediaUrl(content.trailerUrl || '') || null,
-              hlsUrl: resolveMediaUrl(content.hlsUrl || content.videoUrl || '') || null,
-              videoUrl: resolveMediaUrl(content.videoUrl || content.hlsUrl || '') || null,
-              planRequired: content.planRequired || 'free',
-              isPremium: content.planRequired && content.planRequired !== 'free',
+              hlsUrl: stream,
+              videoUrl: stream,
+              planRequired,
+              isPremium: planRequired !== 'free',
+              isLocked: locked,
               isBanner: true,
             };
           } else {

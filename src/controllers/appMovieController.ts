@@ -1,7 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import mongoose from 'mongoose';
 import { MovieModel } from '../models/Movie';
-import { UserModel } from '../models/User';
 import { UserLikeModel } from '../models/UserLike';
 import { UserWishlistModel } from '../models/UserWishlist';
 import { UserWatchProgressModel } from '../models/UserWatchProgress';
@@ -9,6 +8,13 @@ import { UserDownloadModel } from '../models/UserDownload';
 import { logger } from '../lib/logger';
 import { buildShareUrl } from '../lib/config';
 import { QUALITY_LABELS, QUALITY_PLAN_GATE } from './watchController';
+import {
+  canAccessContent,
+  isContentLocked,
+  isQualityLocked,
+  requiresSubscription,
+  resolveEffectiveUserPlan,
+} from '../lib/subscriptionAccess';
 
 // Helper to convert relative URLs to absolute URLs
 const toAbsoluteUrl = (
@@ -36,11 +42,8 @@ const getOptionalUser = async (request: FastifyRequest): Promise<{ userId: strin
     const decoded = server.jwt.verify(authHeader.slice(7)) as any;
     if (!decoded?.id) return null;
 
-    const user = await UserModel.findById(decoded.id).select('subscriptionPlan subscriptionStatus subscriptionExpiry').lean();
-    if (!user) return { userId: decoded.id, userPlan: 'free' };
-
-    const isActive = user.subscriptionStatus === 'active' && (!user.subscriptionExpiry || user.subscriptionExpiry > new Date());
-    return { userId: decoded.id, userPlan: isActive ? (user.subscriptionPlan || 'free') : 'free' };
+    const userPlan = await resolveEffectiveUserPlan(decoded.id);
+    return { userId: decoded.id, userPlan };
   } catch {
     return null;
   }
@@ -158,6 +161,8 @@ export const getMovieDetail = async (request: FastifyRequest, reply: FastifyRepl
       : null;
 
     // ── 6. Video settings (quality options) ──────────────────────────────────
+    const contentPlan = movie.planRequired || 'free';
+    const contentAccessible = canAccessContent(contentPlan, userPlan);
     const hlsUrl = movie.hlsUrl || movie.videoUrl || null;
     const qualities: any[] = movie.videoQualities || [];
 
@@ -167,42 +172,42 @@ export const getMovieDetail = async (request: FastifyRequest, reply: FastifyRepl
       (a, b) => QUALITY_ORDER.indexOf(a.quality) - QUALITY_ORDER.indexOf(b.quality)
     );
 
-    const videoSettings = hlsUrl
-      ? [
-          {
-            key: 'auto',
-            label: 'Auto',
-            description: 'Adjusts quality automatically based on your connection',
-            url: toAbsoluteUrl(request, hlsUrl),
-            requiresPlan: 'free',
-            isLocked: false,
-          },
-          ...sortedQualities.map((q: any) => {
-            const sizeMB = q.size ? `${Math.round(q.size / (1024 * 1024))} MB` : null;
-            const label = QUALITY_LABELS[q.quality] || q.quality;
-            const requiredPlan = QUALITY_PLAN_GATE[q.quality] || 'free';
-            // isLocked: currently always false — flip to real check when subscriptions go live
-            const isLocked = false;
-            const description = q.quality === '144p' ? 'Very low quality — for slow connections' :
-                                q.quality === '240p' ? 'Low quality — saves data' :
-                                q.quality === '360p' ? 'Low quality' :
-                                q.quality === '480p' ? 'Standard definition' :
-                                q.quality === '720p' ? 'High definition' :
-                                q.quality === '1080p' ? 'Full HD — recommended' :
-                                q.quality === '1440p' ? '2K — requires fast connection' :
-                                q.quality === '2160p' ? '4K Ultra HD — requires very fast connection' :
-                                `Stream at ${label}`;
-            return {
-              key: q.quality,
-              label,
-              description: sizeMB ? `${description} (${sizeMB})` : description,
-              url: toAbsoluteUrl(request, q.url),
-              requiresPlan: requiredPlan,
-              isLocked,
-            };
-          })
-        ]
-      : null;
+    const videoSettings =
+      contentAccessible && hlsUrl
+        ? [
+            {
+              key: 'auto',
+              label: 'Auto',
+              description: 'Adjusts quality automatically based on your connection',
+              url: toAbsoluteUrl(request, hlsUrl),
+              requiresPlan: 'free',
+              isLocked: false,
+            },
+            ...sortedQualities.map((q: any) => {
+              const sizeMB = q.size ? `${Math.round(q.size / (1024 * 1024))} MB` : null;
+              const label = QUALITY_LABELS[q.quality] || q.quality;
+              const requiredPlan = QUALITY_PLAN_GATE[q.quality] || 'free';
+              const locked = isQualityLocked(requiredPlan, userPlan);
+              const description = q.quality === '144p' ? 'Very low quality — for slow connections' :
+                                  q.quality === '240p' ? 'Low quality — saves data' :
+                                  q.quality === '360p' ? 'Low quality' :
+                                  q.quality === '480p' ? 'Standard definition' :
+                                  q.quality === '720p' ? 'High definition' :
+                                  q.quality === '1080p' ? 'Full HD — recommended' :
+                                  q.quality === '1440p' ? '2K — requires fast connection' :
+                                  q.quality === '2160p' ? '4K Ultra HD — requires very fast connection' :
+                                  `Stream at ${label}`;
+              return {
+                key: q.quality,
+                label,
+                description: sizeMB ? `${description} (${sizeMB})` : description,
+                url: locked ? null : toAbsoluteUrl(request, q.url),
+                requiresPlan: requiredPlan,
+                isLocked: locked,
+              };
+            })
+          ]
+        : null;
 
     // ── 7. Build response ─────────────────────────────────────────────────────
     const genreNames = (movie.genres as any[]).map((g: any) => g?.name || g);
@@ -222,8 +227,8 @@ export const getMovieDetail = async (request: FastifyRequest, reply: FastifyRepl
         trailerUrl: toAbsoluteUrl(request, movie.trailerUrl) || null,
         type: 'movie',
 
-        // Video
-        hlsUrl: toAbsoluteUrl(request, hlsUrl),
+        // Video — stream URLs only when content is unlocked for this user
+        hlsUrl: contentAccessible ? toAbsoluteUrl(request, hlsUrl) : null,
         videoSettings,
         playbackSpeeds: [
           { value: 0.75, label: '0.75x' },
@@ -233,7 +238,8 @@ export const getMovieDetail = async (request: FastifyRequest, reply: FastifyRepl
           { value: 1.75, label: '1.75x' },
           { value: 2.0, label: '2.0x' }
         ],
-        isLocked: movie.planRequired !== 'free' && userPlan === 'free',
+        isLocked: isContentLocked(contentPlan, userPlan),
+        requiresSubscription: requiresSubscription(contentPlan),
 
         // Meta
         genres: genreNames,
