@@ -675,16 +675,7 @@ export const updateAppProfile = async (request: FastifyRequest, reply: FastifyRe
 
         // Heal subscription fields from live Subscription row
         if (existingLiveSub) {
-          const n = String(existingLiveSub.plan || '').toLowerCase();
-          const planKey = n.includes('premium')
-            ? 'premium'
-            : n.includes('standard')
-              ? 'standard'
-              : n.includes('basic')
-                ? 'basic'
-                : existingPlanField !== 'free'
-                  ? existingPlanField
-                  : 'standard';
+          const planKey = existingLiveSub.plan || existingPlanField || 'free';
           (existing as any).subscriptionPlan = planKey;
           (existing as any).subscriptionStatus = 'active';
           (existing as any).subscriptionExpiry = existingLiveSub.endDate || null;

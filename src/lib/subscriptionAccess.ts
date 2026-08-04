@@ -94,7 +94,7 @@ export async function resolveEffectiveUserPlan(
     try {
       await UserModel.findByIdAndUpdate(oid, {
         $set: {
-          subscriptionPlan: planKey,
+          subscriptionPlan: liveSub.plan || planKey,
           subscriptionStatus: 'active',
           subscriptionExpiry: liveSub.endDate || null,
           subscriptionPlanId: liveSub.planId || null,
@@ -105,7 +105,7 @@ export async function resolveEffectiveUserPlan(
       // Non-fatal — still return the live plan for this request
     }
 
-    return planKey;
+    return liveSub.plan || planKey;
   }
 
   // No live Subscription row — use User fields (legacy / admin-set)

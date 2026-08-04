@@ -123,7 +123,7 @@ export async function syncUserSubscription(
     userId,
     {
       $set: {
-        subscriptionPlan: stillActive ? planKey : 'free',
+        subscriptionPlan: stillActive ? (data.plan || planKey) : 'free',
         subscriptionStatus: stillActive ? 'active' : status === 'cancelled' ? 'cancelled' : 'inactive',
         subscriptionExpiry: stillActive && endDate ? endDate : endDate || null,
         subscriptionPlanId: stillActive && data.planId ? data.planId : null,
