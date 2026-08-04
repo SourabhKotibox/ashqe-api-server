@@ -70,7 +70,7 @@ async function resolveSubscriptionPayload(user: any) {
     (!expiry || new Date(expiry) > new Date());
 
   return {
-    subscriptionPlan: active ? plan : 'free',
+    subscriptionPlan: active ? (user.subscriptionPlanName || plan) : 'free', // Prefer actual plan name from admin panel
     subscriptionPlanName: active ? (user.subscriptionPlanName || null) : null, // Return actual plan name from admin panel
     subscriptionStatus: active ? 'active' : 'inactive',
     subscriptionExpiry: expiry,
@@ -261,17 +261,22 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
     // ── Manage Device Limits ──────────────────────────────────────────────────
     if (deviceId) {
       let deviceLimitCount = 1;
-      const planName = userDoc.subscriptionPlan || 'free';
-      const isActive = userDoc.subscriptionStatus === 'active' && 
+      const isActive = userDoc.subscriptionStatus === 'active' &&
                        (!userDoc.subscriptionExpiry || userDoc.subscriptionExpiry > new Date());
-                       
-      if (isActive && planName !== 'free') {
-        const plan = await SubscriptionPlanModel.findOne({ name: planName }).lean();
-        if (plan) {
-          const limit = await PlanLimitModel.findOne({ planId: plan._id }).lean();
-          if (limit) {
-            deviceLimitCount = limit.deviceLimitCount;
-          }
+
+      if (isActive && userDoc.subscriptionPlan !== 'free') {
+        // Look up plan by ID first (most reliable), fallback to name match
+        const planDoc = (userDoc as any).subscriptionPlanId
+          ? await SubscriptionPlanModel.findById((userDoc as any).subscriptionPlanId).lean()
+          : await SubscriptionPlanModel.findOne({
+              $or: [
+                { name: (userDoc as any).subscriptionPlanName || userDoc.subscriptionPlan },
+                { name: new RegExp(`^${userDoc.subscriptionPlan}$`, 'i') },
+              ],
+            }).lean();
+        if (planDoc) {
+          const limit = await PlanLimitModel.findOne({ planId: planDoc._id }).lean();
+          if (limit) deviceLimitCount = limit.deviceLimitCount;
         }
       }
 
@@ -607,7 +612,8 @@ export const googleAuth = async (request: FastifyRequest, reply: FastifyReply) =
 
     const user = await findOrCreateSocialUser(payload.email, payload.name || payload.email.split('@')[0], 'google');
     const accessToken = signUserToken(request, user);
-    return reply.send({ success: true, accessToken, userId: user._id.toString(), name: user.name, subscriptionPlan: user.subscriptionPlanName || user.subscriptionPlan || 'free', subscriptionPlanName: user.subscriptionPlanName || null, subscriptionStatus: user.subscriptionStatus || 'inactive', expiresIn: 604800 });
+    const sub = await resolveSubscriptionPayload(user); // Resolve real plan name from live Subscription row
+    return reply.send({ success: true, accessToken, userId: user._id.toString(), name: user.name, avatar: user.avatar || null, ...sub, expiresIn: 604800 });
   } catch (error) {
     console.error('Google Auth Error:', error);
     return reply.status(500).send({ success: false, message: 'Google authentication failed' });
@@ -666,7 +672,8 @@ export const appleAuth = async (request: FastifyRequest, reply: FastifyReply) =>
 
     const user = await findOrCreateSocialUser(email, name, 'apple');
     const accessToken = signUserToken(request, user);
-    return reply.send({ success: true, accessToken, userId: user._id.toString(), name: user.name, subscriptionPlan: user.subscriptionPlanName || user.subscriptionPlan || 'free', subscriptionPlanName: user.subscriptionPlanName || null, subscriptionStatus: user.subscriptionStatus || 'inactive', expiresIn: 604800 });
+    const sub = await resolveSubscriptionPayload(user); // Resolve real plan name from live Subscription row
+    return reply.send({ success: true, accessToken, userId: user._id.toString(), name: user.name, avatar: user.avatar || null, ...sub, expiresIn: 604800 });
   } catch (error) {
     console.error('Apple Auth Error:', error);
     return reply.status(500).send({ success: false, message: 'Apple authentication failed' });

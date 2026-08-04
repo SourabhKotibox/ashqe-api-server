@@ -3,9 +3,10 @@ import { MovieModel } from '../models/Movie';
 import { logger } from '../lib/logger';
 
 // Get these from env variables in production
-const APP_PACKAGE_NAME = process.env.APP_PACKAGE_NAME || 'com.ashqe.app';
+const APP_PACKAGE_NAME = process.env.APP_PACKAGE_NAME || 'com.ashqe.tophills';
 const APP_SCHEME = process.env.APP_SCHEME || 'ashqe';
 const APP_STORE_ID = process.env.APP_STORE_ID || '123456789';
+const FRONTEND_URL = process.env.FRONTEND_URL || 'https://ashqe.app';
 
 // Helper to increment share count dynamically
 const incrementShareCount = async (contentId: string, _contentType?: string) => {
@@ -24,7 +25,9 @@ export const handleShareRedirect = async (request: FastifyRequest, reply: Fastif
   await incrementShareCount(contentId, query.contentType);
 
   // Android Intent URI (Automatically opens app OR Play Store if not installed)
-  const androidIntent = `intent://watch/${contentId}#Intent;scheme=${APP_SCHEME};package=${APP_PACKAGE_NAME};end`;
+  // S.browser_fallback_url forces Play Store if intent fails
+  const playStoreUrl = `https://play.google.com/store/apps/details?id=${APP_PACKAGE_NAME}&referrer=movie_id%3D${contentId}`;
+  const androidIntent = `intent://watch/${contentId}#Intent;scheme=${APP_SCHEME};package=${APP_PACKAGE_NAME};S.browser_fallback_url=${encodeURIComponent(playStoreUrl)};end`;
   
   // iOS Custom Scheme
   const iosScheme = `${APP_SCHEME}://watch/${contentId}`;
@@ -59,7 +62,7 @@ export const handleShareRedirect = async (request: FastifyRequest, reply: Fastif
           } 
           else {
             // Desktop or other: redirect to website
-            window.location.replace("https://aapki-website.com/watch/${contentId}");
+            window.location.replace("${FRONTEND_URL}/watch/${contentId}");
           }
         });
       </script>

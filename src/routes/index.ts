@@ -51,6 +51,26 @@ import reviewRoutes from './review';
 import viewsRoutes from './views';
 
 const router: FastifyPluginAsync = async (fastify) => {
+  // Android App Links assetlinks.json - serve with correct Content-Type (register first to avoid conflicts)
+  fastify.get('/.well-known/assetlinks.json', async (request, reply) => {
+    try {
+      const fs = await import('fs');
+      const path = await import('path');
+      const filePath = path.join(__dirname, '../public/.well-known/assetlinks.json');
+      
+      if (fs.existsSync(filePath)) {
+        const fileContent = fs.readFileSync(filePath, 'utf-8');
+        return reply
+          .header('Content-Type', 'application/json')
+          .send(fileContent);
+      } else {
+        return reply.status(404).send({ error: 'File not found' });
+      }
+    } catch (error) {
+      return reply.status(500).send({ error: 'Internal server error' });
+    }
+  });
+
   fastify.register(viewsRoutes);
   fastify.register(reviewRoutes);
   fastify.register(adminNotificationsRoutes, { prefix: '/admin-notifications' });
@@ -164,6 +184,26 @@ const router: FastifyPluginAsync = async (fastify) => {
       : playStoreUrl;
     
     return reply.redirect(302, redirectUrl);
+  });
+
+  // Android App Links assetlinks.json - serve with correct Content-Type
+  fastify.get('/.well-known/assetlinks.json', async (request, reply) => {
+    try {
+      const fs = await import('fs');
+      const path = await import('path');
+      const filePath = path.join(__dirname, '../public/.well-known/assetlinks.json');
+      
+      if (fs.existsSync(filePath)) {
+        const fileContent = fs.readFileSync(filePath, 'utf-8');
+        return reply
+          .header('Content-Type', 'application/json')
+          .send(fileContent);
+      } else {
+        return reply.status(404).send({ error: 'File not found' });
+      }
+    } catch (error) {
+      return reply.status(500).send({ error: 'Internal server error' });
+    }
   });
 
 };

@@ -87,14 +87,29 @@ const pickDownloadUrl = (movie: any, request: FastifyRequest): string => {
 
 async function resolveDownloadLimits(userId: string): Promise<{ allowed: boolean; max: number; reason?: string }> {
   // Real active plan from Subscription collection
+  const { SubscriptionModel } = await import('../models/Subscription');
+  const liveSub = await SubscriptionModel.findOne({
+    userId: new mongoose.Types.ObjectId(userId),
+    status: 'active',
+    $or: [{ endDate: { $gte: new Date() } }, { endDate: null }, { endDate: { $exists: false } }],
+  })
+    .sort({ endDate: -1 })
+    .lean();
+
   const planName = await resolveEffectiveUserPlan(userId);
   if (planName === 'free') {
     return { allowed: false, max: 0, reason: 'Active subscription required to download content.' };
   }
 
-  const plan = await SubscriptionPlanModel.findOne({
-    name: { $regex: new RegExp(`^${planName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-  }).lean();
+  // Look up plan by ID first (most reliable), fallback to real name then tier name
+  const plan = liveSub?.planId
+    ? await SubscriptionPlanModel.findById(liveSub.planId).lean()
+    : await SubscriptionPlanModel.findOne({
+        $or: [
+          { name: liveSub?.plan || planName },
+          { name: new RegExp(`^${planName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+        ],
+      }).lean();
 
   if (!plan) {
     // Paid active user without matching plan doc — allow a safe default

@@ -122,4 +122,32 @@ fastify.register(router, { prefix: '/api' });
 // Browser calls /api/auth/login → backend sees /auth/login
 fastify.register(router);
 
+// Android App Links assetlinks.json - serve with correct Content-Type
+// Use setNotFoundHandler to intercept 404s and serve assetlinks.json
+fastify.setNotFoundHandler(async (request, reply) => {
+  if (request.url === '/.well-known/assetlinks.json') {
+    try {
+      const fs = await import('fs');
+      const path = await import('path');
+      const filePath = path.join(__dirname, '../public/.well-known/assetlinks.json');
+      
+      if (fs.existsSync(filePath)) {
+        const fileContent = fs.readFileSync(filePath, 'utf-8');
+        return reply
+          .header('Content-Type', 'application/json')
+          .send(fileContent);
+      }
+    } catch (error) {
+      console.error('Error serving assetlinks.json:', error);
+    }
+  }
+  
+  // Default 404 handler
+  reply.code(404).type('application/json').send({ 
+    statusCode: 404, 
+    error: 'Not Found', 
+    message: 'Route ' + request.url + ' not found' 
+  });
+});
+
 export default fastify;

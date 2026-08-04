@@ -1,6 +1,35 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { SubscriptionPlanModel } from '../models/SubscriptionPlan';
 
+/**
+ * Public app-facing endpoint — returns only active subscription plans from the admin panel.
+ * No auth required. Used by the mobile app subscription / paywall screen.
+ */
+export const getAppPlans = async (request: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const plans = await SubscriptionPlanModel.find({ status: true })
+      .sort({ level: 1, createdAt: 1 })
+      .lean();
+
+    return reply.send({
+      success: true,
+      data: plans.map((plan) => ({
+        id: plan._id,
+        name: plan.name,
+        duration: plan.duration,
+        durationValue: plan.durationValue,
+        price: plan.price,
+        discount: plan.discount,
+        totalPrice: plan.totalPrice,
+        description: plan.description,
+        level: plan.level,
+      })),
+    });
+  } catch (error: any) {
+    return reply.status(500).send({ success: false, error: error.message });
+  }
+};
+
 export const listSubscriptionPlans = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const query = request.query as {

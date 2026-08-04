@@ -137,9 +137,15 @@ export const getAppProfile = async (request: FastifyRequest, reply: FastifyReply
         const prefix = appName.substring(0, 4).toUpperCase();
         const displayId = `${prefix}${String(userNumber).padStart(4, '0')}`;
 
-        const plan = await SubscriptionPlanModel.findOne({
-          name: { $regex: new RegExp(`^${String(effectivePlan || 'free').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-        }).lean();
+        // Look up plan by ID first (most reliable), fallback to name
+        const plan = (user as any).subscriptionPlanId
+          ? await SubscriptionPlanModel.findById((user as any).subscriptionPlanId).lean()
+          : await SubscriptionPlanModel.findOne({
+              $or: [
+                { name: (user as any).subscriptionPlanName || effectivePlan },
+                { name: new RegExp(`^${String(effectivePlan || 'free').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
+              ],
+            }).lean();
         let profileLimitCount = 1;
         if (plan) {
           const limit = await PlanLimitModel.findOne({ planId: plan._id }).lean();
@@ -890,23 +896,28 @@ export const createProfile = async (request: FastifyRequest, reply: FastifyReply
     const user = await UserModel.findById(userId);
     if (!user) return reply.status(404).send({ success: false, message: 'User not found' });
 
-    // Enforce limits
+    // Enforce limits — look up plan by ID first (most reliable), fallback to name
     let profileLimitCount = 1;
-    const planName = user.subscriptionPlan || 'free';
-    const isActive = user.subscriptionStatus === 'active' && 
+    const isActive = user.subscriptionStatus === 'active' &&
                      (!user.subscriptionExpiry || user.subscriptionExpiry > new Date());
-                     
-    if (isActive && planName !== 'free') {
-      const plan = await SubscriptionPlanModel.findOne({ name: { $regex: new RegExp(`^${planName}$`, 'i') } }).lean();
-      if (plan) {
-        const limit = await PlanLimitModel.findOne({ planId: plan._id }).lean();
+
+    if (isActive && user.subscriptionPlan !== 'free') {
+      const planDoc = (user as any).subscriptionPlanId
+        ? await SubscriptionPlanModel.findById((user as any).subscriptionPlanId).lean()
+        : await SubscriptionPlanModel.findOne({
+            $or: [
+              { name: (user as any).subscriptionPlanName || user.subscriptionPlan },
+              { name: new RegExp(`^${user.subscriptionPlan}$`, 'i') },
+            ],
+          }).lean();
+      if (planDoc) {
+        const limit = await PlanLimitModel.findOne({ planId: planDoc._id }).lean();
         if (limit) profileLimitCount = limit.profileLimitCount;
       } else {
-        // Fallback for active premium users if the exact plan name is not found
+        // Fallback for active users if plan is not found by name or ID
         profileLimitCount = 4;
       }
     } else if (isActive) {
-      // If they are active but planName is somehow 'free' or empty, give them premium limits as a fallback
       profileLimitCount = 4;
     }
 
