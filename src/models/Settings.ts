@@ -247,7 +247,7 @@ const SettingsSchema = new Schema<ISettings>(
     notifPaymentFailed: { type: Boolean, default: true },
     notifContentExpiry: { type: Boolean, default: false },
     // Currency
-    currencyCode: { type: String, default: 'USD' },
+    currencyCode: { type: String, default: 'INR' },
     currencySymbol: { type: String, default: '$' },
     currencyPosition: { type: String, enum: ['before', 'after'], default: 'before' },
     decimalPlaces: { type: Number, default: 2 },

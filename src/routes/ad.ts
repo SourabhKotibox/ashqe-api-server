@@ -9,7 +9,7 @@ export default async function (fastify: FastifyInstance) {
   fastify.post('/ads', { onRequest: [requirePermission('ads', 'canCreate')] }, createAd);
   fastify.put('/ads/:id', { onRequest: [requirePermission('ads', 'canEdit')] }, updateAd);
   fastify.delete('/ads/:id', { onRequest: [requirePermission('ads', 'canDelete')] }, deleteAd);
-  fastify.post('/ads/bulk-delete', { onRequest: [requirePermission('ads', 'canCreate')] }, bulkDeleteAds);
+  fastify.post('/ads/bulk-delete', { onRequest: [requirePermission('ads', 'canDelete')] }, bulkDeleteAds);
 
   // --- App / Public Routes (no auth required — app users are not admin users) ---
   fastify.get('/public/ads', getActiveAds);

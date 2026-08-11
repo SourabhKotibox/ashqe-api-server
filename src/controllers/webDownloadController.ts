@@ -93,10 +93,11 @@ const pickDownloadUrl = (movie: any, request: FastifyRequest): string => {
   return '';
 };
 
-const userCanDownload = async (userId: string): Promise<{ ok: boolean; message?: string }> => {
-  // Real active plan from Subscription collection
+const userCanDownload = async (userId: string): Promise<{ ok: boolean; message?: string; max?: number }> => {
   const planName = await resolveEffectiveUserPlan(userId);
-  const isActive = planName !== 'free';
+  if (planName === 'free') {
+    return { ok: false, message: 'Active subscription required to download content.' };
+  }
 
   const user = await UserModel.findById(userId)
     .select('subscriptionPlanId')
@@ -106,35 +107,31 @@ const userCanDownload = async (userId: string): Promise<{ ok: boolean; message?:
   let planId = user.subscriptionPlanId;
   if (!planId) {
     const plan = await SubscriptionPlanModel.findOne({
-      name: new RegExp(`^${planName}$`, 'i'),
+      name: new RegExp(`^${planName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
       status: true,
     }).lean();
     planId = plan?._id;
   }
 
-  if (planId) {
-    const lim = await PlanLimitModel.findOne({ planId }).lean();
-    if (lim && lim.downloadStatus === false) {
-      return {
-        ok: false,
-        message: 'Your plan does not include downloads. Upgrade to Standard or Premium.',
-      };
-    }
-    if (lim && lim.downloadStatus === true) {
-      if (!isActive) {
-        return { ok: false, message: 'Active subscription required to download.' };
-      }
-      return { ok: true };
-    }
+  if (!planId) {
+    return { ok: false, message: 'No active plan found for downloads.' };
   }
 
-  // Fallback by plan tier: standard/premium can download when active
-  if (isActive && (planName === 'standard' || planName === 'premium')) return { ok: true };
-  if (planName === 'free') {
-    // Allow free-tier download when movie is free + downloadAllowed (soft open for demos)
-    return { ok: true };
+  const lim = await PlanLimitModel.findOne({ planId }).lean();
+  if (!lim) {
+    return { ok: true, max: 10 };
   }
-  return { ok: false, message: 'Active subscription required to download content.' };
+  if (lim.downloadStatus === false) {
+    return { ok: false, message: 'Your plan does not include downloads. Upgrade to download.' };
+  }
+
+  const max = Math.max(0, Number((lim as any).downloadLimitCount ?? 10));
+  const used = await UserDownloadModel.countDocuments({ userId: new mongoose.Types.ObjectId(userId) });
+  if (used >= max) {
+    return { ok: false, message: `Download limit reached (${max}). Remove an old download or upgrade your plan.`, max };
+  }
+
+  return { ok: true, max };
 };
 
 // POST /api/web/download
@@ -173,6 +170,20 @@ export const webRequestDownload = async (request: FastifyRequest, reply: Fastify
 
     if ((movie as any).downloadAllowed === false) {
       return reply.status(400).send({ success: false, message: 'Downloading is disabled for this movie.' });
+    }
+
+    const existing = await UserDownloadModel.findOne({ userId: userObjectId, contentId, profileId: profileId || null }).lean();
+    if (!existing) {
+      const used = await UserDownloadModel.countDocuments({ userId: userObjectId });
+      if (entitlement.max && used >= entitlement.max) {
+        return reply.status(403).send({
+          success: false,
+          message: `Download limit reached (${entitlement.max}). Remove an old download or upgrade your plan.`,
+          code: 'DOWNLOAD_LIMIT',
+          limit: entitlement.max,
+          used,
+        });
+      }
     }
 
     const title = movie.title;

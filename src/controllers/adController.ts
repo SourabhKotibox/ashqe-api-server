@@ -21,7 +21,25 @@ export const getAds = async (request: FastifyRequest, reply: FastifyReply) => {
 
 export const createAd = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
-    const adData = request.body;
+    const adData = request.body as any;
+    const { adName, adType, placement, startDate, endDate, mediaUrl } = adData;
+
+    if (!adName || !adType || !placement || !startDate || !endDate || !mediaUrl) {
+      return reply.status(400).send({ success: false, message: 'Missing required fields: adName, adType, placement, startDate, endDate, mediaUrl' });
+    }
+
+    if (!['Video', 'Image', 'Custom'].includes(adType)) {
+      return reply.status(400).send({ success: false, message: 'Invalid adType. Must be Video, Image, or Custom.' });
+    }
+
+    if (!['Player', 'Home Page', 'Banner'].includes(placement)) {
+      return reply.status(400).send({ success: false, message: 'Invalid placement. Must be Player, Home Page, or Banner.' });
+    }
+
+    if (new Date(startDate) > new Date(endDate)) {
+      return reply.status(400).send({ success: false, message: 'Start date must be before end date.' });
+    }
+
     const ad = await AdModel.create(adData);
     return reply.status(201).send({ success: true, data: ad });
   } catch (error: any) {
@@ -32,7 +50,20 @@ export const createAd = async (request: FastifyRequest, reply: FastifyReply) => 
 export const updateAd = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const { id } = request.params as { id: string };
-    const updates = request.body;
+    const updates = request.body as any;
+
+    if (updates.startDate && updates.endDate && new Date(updates.startDate) > new Date(updates.endDate)) {
+      return reply.status(400).send({ success: false, message: 'Start date must be before end date.' });
+    }
+
+    if (updates.adType && !['Video', 'Image', 'Custom'].includes(updates.adType)) {
+      return reply.status(400).send({ success: false, message: 'Invalid adType. Must be Video, Image, or Custom.' });
+    }
+
+    if (updates.placement && !['Player', 'Home Page', 'Banner'].includes(updates.placement)) {
+      return reply.status(400).send({ success: false, message: 'Invalid placement. Must be Player, Home Page, or Banner.' });
+    }
+
     const ad = await AdModel.findByIdAndUpdate(id, updates, { new: true });
     if (!ad) return reply.status(404).send({ success: false, message: 'Ad not found' });
     return reply.send({ success: true, data: ad });
@@ -85,16 +116,10 @@ export const getActiveAds = async (request: FastifyRequest, reply: FastifyReply)
     
     // Match specific tags (e.g. 'Operation Viper') if passed by the frontend
     if (query.targetCategory) {
-      filter.targetCategories = query.targetCategory; 
+      filter.targetCategories = { $in: [query.targetCategory] };
     }
 
     const ads = await AdModel.find(filter).select('-clicks -impressions -status -createdAt -updatedAt -__v').lean();
-    
-    // Automatically increment impressions for returned ads (in background)
-    if (ads.length > 0) {
-      const adIds = ads.map(a => a._id);
-      AdModel.updateMany({ _id: { $in: adIds } }, { $inc: { impressions: 1 } }).exec();
-    }
 
     const mappedAds = ads;
     return reply.send({ success: true, data: mappedAds });
