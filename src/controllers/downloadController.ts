@@ -12,6 +12,7 @@ import { resolveEffectiveUserPlan } from '../lib/subscriptionAccess';
 const formatSizeMB = (sizeBytes: number): string => {
   return sizeBytes ? `${Math.round(sizeBytes / (1024 * 1024))} MB` : 'N/A';
 };
+const S3_PUBLIC_BASE = (process.env.AWS_S3_PUBLIC_BASE_URL || 'https://ashqe-bucket-v1.s3.ap-south-1.amazonaws.com').replace(/\/$/, '');
 
 const toAbsoluteUrl = (
   request: FastifyRequest,
@@ -19,17 +20,24 @@ const toAbsoluteUrl = (
 ): string | null => {
   if (!url) return null;
   if (url.startsWith('http://') || url.startsWith('https://')) return url;
+  if (url.startsWith('s3://')) return url;
+  if (url.includes('.amazonaws.com')) return url;
+
+  if (url.startsWith('media/')) {
+    return `${S3_PUBLIC_BASE}/${url}`;
+  }
 
   let relPath = url;
   if (!relPath.startsWith('/uploads/')) {
-    relPath = relPath.startsWith('uploads/') ? `/${relPath}` : `/uploads/${relPath.startsWith('/') ? relPath.slice(1) : relPath}`;
+    relPath = relPath.startsWith('uploads/')
+      ? `/${relPath}`
+      : `/uploads/${relPath.startsWith('/') ? relPath.slice(1) : relPath}`;
   }
 
   const host = request.headers.host || request.hostname;
   const proto = (request.headers['x-forwarded-proto'] as string) || request.protocol || 'http';
   return `${proto}://${host}${relPath}`;
 };
-
 const normalizeMediaUrl = (u: string): string =>
   String(u || '')
     .trim()
@@ -41,18 +49,22 @@ const looksLikeTrailerUrl = (u: string, trailerUrl?: string | null): boolean => 
   const n = normalizeMediaUrl(u);
   if (!n) return false;
   const trailer = normalizeMediaUrl(trailerUrl || '');
+  
+  if (/(\/|^)(trailer|teaser|preview)s?([\/._-]|$)/i.test(n)) return true;
+  if (/[._-](trailer|teaser|preview)(\.|$)/i.test(n)) return true;
+  
   if (trailer) {
+    const trailerLooksLikeTrailer = /(trailer|teaser|preview)s?([\/._-]|$)/i.test(trailer);
+    if (!trailerLooksLikeTrailer) return false;
+    
     const tLeaf = trailer.split('/').pop() || '';
     const nLeaf = n.split('/').pop() || '';
     if (n === trailer || (tLeaf && nLeaf && tLeaf === nLeaf)) return true;
   }
-  if (/(\/|^)(trailer|teaser|preview)s?([\/._-]|$)/i.test(n)) return true;
-  if (/[._-](trailer|teaser|preview)(\.|$)/i.test(n)) return true;
   return false;
 };
-
-/** Progressive full-movie URL only — never the trailer. */
-const pickDownloadUrl = (movie: any, request: FastifyRequest): string => {
+/** Progressive full-movie URL or HLS playlist — never the trailer. */
+const pickDownloadUrl = (movie: any, request: FastifyRequest): { url: string; isHls: boolean } => {
   const usable = (u?: string | null) => {
     const s = String(u || '').trim();
     if (!s || s.startsWith('blob:')) return '';
@@ -70,19 +82,22 @@ const pickDownloadUrl = (movie: any, request: FastifyRequest): string => {
   const video = usable(movie.videoUrl);
   const hls = usable(movie.hlsUrl);
 
-  if (source && !source.includes('.m3u8')) push(source);
-  if (video && !video.includes('.m3u8')) push(video);
+  if (source) push(source);
+  if (video) push(video);
   for (const q of movie.videoQualities || []) {
     const qu = usable(q?.url);
-    if (qu && !qu.includes('.m3u8')) push(qu);
+    if (qu) push(qu);
   }
-  if (hls && !hls.includes('.m3u8')) push(hls);
+  if (hls) push(hls);
 
   for (const c of candidates) {
     const abs = toAbsoluteUrl(request, c);
-    if (abs && !abs.startsWith('blob:') && !looksLikeTrailerUrl(abs, trailer)) return abs;
+    if (abs && !abs.startsWith('blob:') && !looksLikeTrailerUrl(abs, trailer)) {
+      return { url: abs, isHls: abs.includes('.m3u8') };
+    }
   }
-  return '';
+
+  return { url: '', isHls: false };
 };
 
 async function resolveDownloadLimits(userId: string): Promise<{ allowed: boolean; max: number; reason?: string }> {
@@ -181,14 +196,29 @@ export const requestDownload = async (request: FastifyRequest, reply: FastifyRep
     const title = movie.title;
     const thumbnail = toAbsoluteUrl(request, movie.thumbnail || '') || '';
     const duration = movie.duration || 0;
-    const downloadUrl = pickDownloadUrl(movie, request);
+    const { url: downloadUrl, isHls } = pickDownloadUrl(movie, request);
     if (!downloadUrl) {
       const hasHls = !!(movie as any).hlsUrl && String((movie as any).hlsUrl).includes('.m3u8');
+      const hasSource = !!(movie as any).sourceVideoUrl;
+      const hasVideo = !!(movie as any).videoUrl;
+      const hasQualities = (movie as any).videoQualities?.length > 0;
+      const trailer = (movie as any).trailerUrl;
+      const reason = hasHls
+        ? 'This movie is streaming-only (HLS). A progressive MP4 is required for offline download — re-upload the full movie file.'
+        : `No full movie file available for offline download. ` +
+          `Fields present — sourceVideoUrl: ${hasSource}, videoUrl: ${hasVideo}, qualities: ${hasQualities}, hls: ${hasHls}, trailer: ${!!trailer}. ` +
+          `Attach a progressive MP4 (not HLS, not trailer) in Media Library.`;
       return reply.status(404).send({
         success: false,
-        message: hasHls
-          ? 'This movie is streaming-only (HLS). A progressive MP4 is required for offline download — re-upload the full movie file.'
-          : 'No full movie file available for offline download. Trailer cannot be used — attach the full movie video.',
+        message: reason,
+        debug: {
+          title: movie.title,
+          hasSourceVideoUrl: hasSource,
+          hasVideoUrl: hasVideo,
+          hasVideoQualities: hasQualities,
+          hasHlsUrl: hasHls,
+          hasTrailerUrl: !!trailer,
+        }
       });
     }
     const qualities = (movie.videoQualities || []).map((q: any) => ({
@@ -218,6 +248,7 @@ export const requestDownload = async (request: FastifyRequest, reply: FastifyRep
         thumbnail: thumbnail,
         duration: duration,
         downloadUrl: downloadUrl,
+        isHls: isHls || false,
         videoQualities: qualities,
         downloadLimit: limits.max,
         downloadUsed: used,
@@ -254,6 +285,8 @@ export const getDownloadList = async (request: FastifyRequest, reply: FastifyRep
         url: toAbsoluteUrl(request, q.url)
       }));
 
+      const { url: downloadUrl, isHls } = pickDownloadUrl(movie, request);
+
       result.push({
         id: dl._id.toString(),
         contentId: dl.contentId.toString(),
@@ -261,7 +294,8 @@ export const getDownloadList = async (request: FastifyRequest, reply: FastifyRep
         title: movie.title,
         thumbnail: toAbsoluteUrl(request, movie.thumbnail || '') || '',
         duration: movie.duration || 0,
-        downloadUrl: pickDownloadUrl(movie, request),
+        downloadUrl,
+        isHls: isHls || false,
         videoQualities: qualities,
         status: (dl as any).status || 'pending',
         progress: (dl as any).progress || 0,

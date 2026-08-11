@@ -8,15 +8,20 @@ import { PlanLimitModel } from '../models/PlanLimit';
 import { logger } from '../lib/logger';
 import { resolveEffectiveUserPlan } from '../lib/subscriptionAccess';
 
+const S3_PUBLIC_BASE = (process.env.AWS_S3_PUBLIC_BASE_URL || 'https://ashqe-bucket-v1.s3.ap-south-1.amazonaws.com').replace(/\/$/, '');
+
 const toAbsoluteUrl = (
   request: FastifyRequest,
   url: string | null | undefined
 ): string | null => {
   if (!url) return null;
   if (url.startsWith('http://') || url.startsWith('https://')) return url;
-  // S3-style keys without protocol are returned via getImageUrl on client;
-  // for API absolute URLs we still prefix local uploads only.
-  if (url.includes('.amazonaws.com') || url.startsWith('s3://')) return url;
+  if (url.startsWith('s3://')) return url;
+  if (url.includes('.amazonaws.com')) return url;
+
+  if (url.startsWith('media/')) {
+    return `${S3_PUBLIC_BASE}/${url}`;
+  }
 
   let relPath = url;
   if (!relPath.startsWith('/uploads/')) {
@@ -24,6 +29,7 @@ const toAbsoluteUrl = (
       ? `/${relPath}`
       : `/uploads/${relPath.startsWith('/') ? relPath.slice(1) : relPath}`;
   }
+
   const host = request.headers.host || request.hostname;
   const proto = (request.headers['x-forwarded-proto'] as string) || request.protocol || 'http';
   return `${proto}://${host}${relPath}`;
@@ -41,20 +47,26 @@ const looksLikeTrailerUrl = (u: string, trailerUrl?: string | null): boolean => 
   const n = normalizeMediaUrl(u);
   if (!n) return false;
   const trailer = normalizeMediaUrl(trailerUrl || '');
-  if (trailer && (n === trailer || n.endsWith(trailer.split('/').pop() || '___') || trailer.endsWith(n.split('/').pop() || '___'))) {
-    return true;
-  }
-  // Common filename patterns for trailers
+  
   if (/(\/|^)(trailer|teaser|preview)s?([\/._-]|$)/i.test(n)) return true;
   if (/[._-](trailer|teaser|preview)(\.|$)/i.test(n)) return true;
+  
+  if (trailer) {
+    const trailerLooksLikeTrailer = /(trailer|teaser|preview)s?([\/._-]|$)/i.test(trailer);
+    if (!trailerLooksLikeTrailer) return false;
+    
+    const tLeaf = trailer.split('/').pop() || '';
+    const nLeaf = n.split('/').pop() || '';
+    if (n === trailer || (tLeaf && nLeaf && tLeaf === nLeaf)) return true;
+  }
   return false;
 };
 
 /**
- * Pick a progressive FULL-MOVIE URL for offline download.
- * Never returns the trailer — that was causing "download offline = trailer only".
+ * Pick a full-movie URL for offline download (MP4 or HLS).
+ * Never returns the trailer.
  */
-const pickDownloadUrl = (movie: any, request: FastifyRequest): string => {
+const pickDownloadUrl = (movie: any, request: FastifyRequest): { url: string; isHls: boolean } => {
   const usable = (u?: string | null) => {
     const s = String(u || '').trim();
     if (!s || s.startsWith('blob:')) return '';
@@ -64,9 +76,7 @@ const pickDownloadUrl = (movie: any, request: FastifyRequest): string => {
   const trailer = usable(movie.trailerUrl);
   const candidates: string[] = [];
   const push = (u: string) => {
-    if (!u) return;
-    if (looksLikeTrailerUrl(u, trailer)) return;
-    if (candidates.includes(u)) return;
+    if (!u || looksLikeTrailerUrl(u, trailer) || candidates.includes(u)) return;
     candidates.push(u);
   };
 
@@ -74,23 +84,22 @@ const pickDownloadUrl = (movie: any, request: FastifyRequest): string => {
   const video = usable(movie.videoUrl);
   const hls = usable(movie.hlsUrl);
 
-  // Prefer progressive MP4 / non-HLS full-movie sources
-  if (source && !source.includes('.m3u8')) push(source);
-  if (video && !video.includes('.m3u8')) push(video);
+  if (source) push(source);
+  if (video) push(video);
   for (const q of movie.videoQualities || []) {
     const qu = usable(q?.url);
-    if (qu && !qu.includes('.m3u8')) push(qu);
+    if (qu) push(qu);
   }
-  // Some pipelines store the source MP4 in hlsUrl before transcoding finishes
-  if (hls && !hls.includes('.m3u8')) push(hls);
+  if (hls) push(hls);
 
   for (const c of candidates) {
     const abs = toAbsoluteUrl(request, c);
-    if (abs && !abs.startsWith('blob:') && !looksLikeTrailerUrl(abs, trailer)) return abs;
+    if (abs && !abs.startsWith('blob:') && !looksLikeTrailerUrl(abs, trailer)) {
+      return { url: abs, isHls: abs.includes('.m3u8') };
+    }
   }
 
-  // Do NOT fall back to trailerUrl or HLS playlists — offline cache needs a single progressive file
-  return '';
+  return { url: '', isHls: false };
 };
 
 const userCanDownload = async (userId: string): Promise<{ ok: boolean; message?: string; max?: number }> => {
@@ -189,15 +198,30 @@ export const webRequestDownload = async (request: FastifyRequest, reply: Fastify
     const title = movie.title;
     const thumbnail = toAbsoluteUrl(request, (movie as any).thumbnail || '') || '';
     const duration = (movie as any).duration || 0;
-    const downloadUrl = pickDownloadUrl(movie, request);
+    const { url: downloadUrl, isHls } = pickDownloadUrl(movie, request);
 
     if (!downloadUrl) {
       const hasHls = !!(movie as any).hlsUrl && String((movie as any).hlsUrl).includes('.m3u8');
+      const hasSource = !!(movie as any).sourceVideoUrl;
+      const hasVideo = !!(movie as any).videoUrl;
+      const hasQualities = (movie as any).videoQualities?.length > 0;
+      const trailer = (movie as any).trailerUrl;
+      const reason = hasHls
+        ? 'This movie is streaming-only (HLS). A progressive MP4 is required for offline download — re-upload the full movie file.'
+        : `No full movie file available for offline download. ` +
+          `Fields present — sourceVideoUrl: ${hasSource}, videoUrl: ${hasVideo}, qualities: ${hasQualities}, hls: ${hasHls}, trailer: ${!!trailer}. ` +
+          `Attach a progressive MP4 (not HLS, not trailer) in Media Library.`;
       return reply.status(404).send({
         success: false,
-        message: hasHls
-          ? 'This movie is streaming-only (HLS). A progressive MP4 is required for offline download — re-upload the full movie file in Media Library.'
-          : 'No full movie file available for offline download. Trailer cannot be used — attach the full movie video.',
+        message: reason,
+        debug: {
+          title: movie.title,
+          hasSourceVideoUrl: hasSource,
+          hasVideoUrl: hasVideo,
+          hasVideoQualities: hasQualities,
+          hasHlsUrl: hasHls,
+          hasTrailerUrl: !!trailer,
+        }
       });
     }
 
@@ -224,6 +248,7 @@ export const webRequestDownload = async (request: FastifyRequest, reply: Fastify
         thumbnail,
         duration,
         downloadUrl,
+        isHls: isHls || false,
         videoQualities: qualities,
       },
     });
@@ -256,6 +281,7 @@ export const webGetDownloads = async (request: FastifyRequest, reply: FastifyRep
     for (const dl of downloads) {
       const movie = await MovieModel.findById(dl.contentId).lean();
       if (!movie || movie.status !== 'published') continue;
+      const { url: downloadUrl, isHls } = pickDownloadUrl(movie, request);
       result.push({
         id: dl._id.toString(),
         contentId: dl.contentId.toString(),
@@ -263,7 +289,8 @@ export const webGetDownloads = async (request: FastifyRequest, reply: FastifyRep
         title: (movie as any).title,
         thumbnail: toAbsoluteUrl(request, (movie as any).thumbnail || '') || '',
         duration: (movie as any).duration || 0,
-        downloadUrl: pickDownloadUrl(movie, request),
+        downloadUrl,
+        isHls: isHls || false,
         createdAt: dl.createdAt,
       });
     }
