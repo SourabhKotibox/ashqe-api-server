@@ -404,9 +404,10 @@ import { SettingsModel } from '../models/Settings';
 export const createRazorpayOrder = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const { planId } = request.body as { planId: string };
+    const sanitizedPlanId = String(planId || '').replace(/[^a-fA-F0-9]/g, '');
     
     // Validate Plan
-    const plan = await SubscriptionPlanModel.findById(planId).lean();
+    const plan = await SubscriptionPlanModel.findById(sanitizedPlanId).lean();
     if (!plan) {
       return reply.status(404).send({ success: false, error: 'Plan not found' });
     }
@@ -488,10 +489,10 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
       userId: bodyUserId
     } = request.body as any;
 
-    // Use JWT user if available (user-facing route), otherwise fall back to body userId (admin route)
-    const userId = (request.user as any)?.id || bodyUserId;
+    const sanitizedPlanId = String(planId || '').replace(/[^a-fA-F0-9]/g, '');
+    const sanitizedUserId = String((request.user as any)?.id || bodyUserId || '').replace(/[^a-fA-F0-9]/g, '');
 
-    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !planId || !userId) {
+    if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature || !sanitizedPlanId || !sanitizedUserId) {
       return reply.status(400).send({ success: false, error: 'Missing payment details or plan details' });
     }
 
@@ -512,14 +513,14 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
     }
 
     // Provision subscription
-    const plan = await SubscriptionPlanModel.findById(planId).lean();
+    const plan = await SubscriptionPlanModel.findById(sanitizedPlanId).lean();
     if (!plan) {
       return reply.status(404).send({ success: false, error: 'Plan not found' });
     }
 
     const body = {
-      userId,
-      planId,
+      userId: sanitizedUserId,
+      planId: sanitizedPlanId,
       paymentMethod: 'Razorpay',
       status: 'active',
       price: plan.totalPrice,
@@ -531,7 +532,7 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
     const payload = await buildSubscriptionPayload(body);
     const subscription = await SubscriptionModel.create(payload);
 
-    await syncUserSubscription(userId, {
+    await syncUserSubscription(sanitizedUserId, {
       plan: payload.plan,
       status: payload.status,
       endDate: payload.endDate,
