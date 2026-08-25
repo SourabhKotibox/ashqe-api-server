@@ -4,7 +4,7 @@ export interface ISection extends Document {
   key: string;
   title: string;
   category: string;
-  contentType: 'movie' | 'mixed' | 'web';
+  contentType: 'movie' | 'mixed' | 'web' | 'tvshow';
   platform?: 'app' | 'web' | 'all';
   filter?: Record<string, any>;
   sortBy: Record<string, 1 | -1>;
@@ -16,7 +16,7 @@ export interface ISection extends Document {
   contentSelection?: 'dynamic' | 'manual' | 'mixed';
   manualContentIds?: mongoose.Types.ObjectId[] | string[];
   showViewAll?: boolean; // Whether to show "View All" button
-  itemType?: 'card' | 'poster' | 'thumbnail' | 'landscape' | 'portrait' | 'drama' | 'home-banner' | 'google-adsense';
+  itemType?: 'card' | 'poster' | 'thumbnail' | 'landscape' | 'portrait' | 'drama' | 'tvshow' | 'home-banner' | 'google-adsense';
   createdAt: Date;
   updatedAt: Date;
 }
@@ -28,7 +28,7 @@ const SectionSchema = new Schema<ISection>(
     category: { type: String, required: true },
     contentType: {
       type: String,
-      enum: ['movie', 'mixed', 'web'],
+      enum: ['movie', 'mixed', 'web', 'tvshow'],
       default: 'movie',
       index: true,
     },
@@ -59,7 +59,7 @@ const SectionSchema = new Schema<ISection>(
     showViewAll: { type: Boolean, default: true },
     itemType: { 
       type: String, 
-      enum: ['card', 'poster', 'thumbnail', 'landscape', 'portrait', 'drama', 'home-banner', 'google-adsense'], 
+      enum: ['card', 'poster', 'thumbnail', 'landscape', 'portrait', 'drama', 'tvshow', 'home-banner', 'google-adsense'], 
       default: 'poster' 
     },
   },

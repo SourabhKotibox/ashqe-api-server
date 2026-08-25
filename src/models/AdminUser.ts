@@ -3,6 +3,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IModulePermissions {
   movies: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
+  tvShows: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
   genres: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
   actors: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
   directors: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
@@ -43,6 +44,7 @@ export interface IAdminUser extends Document {
 
 const defaultModulePermissions: IModulePermissions = {
   movies: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+  tvShows: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   genres: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   actors: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   directors: { canView: true, canCreate: false, canEdit: false, canDelete: false },
@@ -79,6 +81,7 @@ const AdminUserSchema = new Schema<IAdminUser>(
     modulePermissions: {
       type: {
         movies: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
+        tvShows: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
         genres: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
         actors: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
         directors: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },

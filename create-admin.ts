@@ -33,6 +33,7 @@ async function createAdmin() {
         updatedAt: new Date(),
         modulePermissions: {
           movies: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+          tvShows: { canView: true, canCreate: true, canEdit: true, canDelete: true },
           genres: { canView: true, canCreate: true, canEdit: true, canDelete: true },
           actors: { canView: true, canCreate: true, canEdit: true, canDelete: true },
           directors: { canView: true, canCreate: true, canEdit: true, canDelete: true },
@@ -68,8 +69,8 @@ async function createAdmin() {
         darkLogoUrl: '/logo.png',
         lightLogoUrl: '/logo.png',
         faviconUrl: '/favicon.png',
-        primaryColor: '#FF8C38',
-        colorTheme: 'orange',
+        primaryColor: '#e50914',
+        colorTheme: 'blue-green',
         copyrightText: '© 2026 Ashqe. All Rights Reserved.',
         siteDescription: 'Ashqe — stream premium movies and series.',
         loginTitle: 'Welcome Back',
