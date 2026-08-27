@@ -92,7 +92,7 @@ export const getWebBrowse = async (request: FastifyRequest, reply: FastifyReply)
 
     const selectFields = 'title description shortDescription thumbnail bannerImage posterImage year rating ageRating duration imdbRating featured trending isNewContent views genres languages createdAt';
 
-    const Model = query.type === 'show' || query.type === 'tvshows' ? TVShowModel : MovieModel;
+    const Model: any = query.type === 'show' || query.type === 'tvshows' ? TVShowModel : MovieModel;
     const [rawItems, total] = await Promise.all([
       Model.find(filter).sort(sort).skip(skip).limit(limit).select(selectFields).populate('genres', 'name').lean(),
       Model.countDocuments(filter)

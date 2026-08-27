@@ -118,8 +118,8 @@ export const createEpisode = async (request: FastifyRequest, reply: FastifyReply
     const episode = await EpisodeModel.create(body);
 
     if (isRawLocalVideo && episode.sourceVideoUrl) {
-      import('../services/videoProcessor').then(({ processEpisodesInBackground }) => {
-        processEpisodesInBackground([episode._id as Types.ObjectId], episode.sourceVideoUrl!);
+      import('../services/videoProcessor').then(({ processEpisodeInBackground }) => {
+        processEpisodeInBackground(episode._id as Types.ObjectId, episode.sourceVideoUrl!);
       });
     }
 
@@ -163,8 +163,8 @@ export const updateEpisode = async (request: FastifyRequest, reply: FastifyReply
     }
 
     if (isRawLocalVideo && (episode as any).sourceVideoUrl) {
-      import('../services/videoProcessor').then(({ processEpisodesInBackground }) => {
-        processEpisodesInBackground([new Types.ObjectId(id)], (episode as any).sourceVideoUrl!);
+      import('../services/videoProcessor').then(({ processEpisodeInBackground }) => {
+        processEpisodeInBackground(new Types.ObjectId(id), (episode as any).sourceVideoUrl!);
       });
     }
 

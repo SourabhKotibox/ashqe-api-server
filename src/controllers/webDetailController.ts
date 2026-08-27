@@ -28,7 +28,8 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
     const { contentId } = request.params as { contentId: string };
     const userPlan = await getOptionalUserPlan(request);
 
-    const item: any = await MovieModel.findById(contentId)
+    let isSeries = false;
+    let item: any = await MovieModel.findById(contentId)
       .populate('genres', 'name')
       .populate('languages', 'name')
       .populate('subtitleLanguages', 'name code')
@@ -36,6 +37,22 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
       .populate('cast.actor', 'name image designation')
       .populate('crew.director', 'name image designation')
       .lean();
+
+    if (!item) {
+      const { TVShowModel } = await import('../models/TVShow');
+      item = await TVShowModel.findById(contentId)
+        .populate('genres', 'name')
+        .populate('languages', 'name')
+        .populate('subtitleLanguages', 'name code')
+        .populate('subtitles.language', 'name code')
+        .populate('cast.actor', 'name image designation')
+        .populate('crew.director', 'name image designation')
+        .lean();
+      
+      if (item) {
+        isSeries = true;
+      }
+    }
 
     if (!item || item.status !== 'published') {
       return reply.status(404).send({ success: false, message: 'Content not found' });
@@ -127,8 +144,8 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
       originalTitle: item.originalTitle || null,
       poster: item.posterImage || item.thumbnail || '',
       backdrop: item.bannerImage || item.thumbnail || '',
-      type: 'movie',
-      contentType: 'movie',
+      type: isSeries ? 'show' : 'movie',
+      contentType: isSeries ? 'tvShow' : 'movie',
       playerType: 'standard',
       year: item.year?.toString() || new Date(item.createdAt).getFullYear().toString(),
       duration: durationFormatted || 'N/A',
@@ -208,11 +225,55 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
       });
     }
 
+    let seasons: any[] = [];
+    let flatEpisodes: any[] = [];
+    if (isSeries) {
+      const { EpisodeModel } = await import('../models/Episode');
+      const allEpisodes = await EpisodeModel.find({
+        tvShowId: item._id,
+        processingStatus: 'ready'
+      }).sort({ season: 1, episode: 1 }).lean();
+
+      const seasonsMap = new Map<number, any[]>();
+      for (const ep of allEpisodes) {
+        if (!seasonsMap.has(ep.season)) {
+          seasonsMap.set(ep.season, []);
+        }
+        
+        const h = ep.duration ? Math.floor(ep.duration / 3600) : 0;
+        const m = ep.duration ? Math.floor((ep.duration % 3600) / 60) : 0;
+        const durStr = ep.duration ? (h > 0 ? `${h}h ${m}m` : `${m}m`) : null;
+        
+        const mappedEp = {
+          id: ep._id.toString(),
+          season: ep.season,
+          episode: ep.episode,
+          title: ep.title,
+          description: ep.description || null,
+          thumbnail: ep.thumbnail || item.thumbnail || null,
+          duration: ep.duration || null,
+          durationFormatted: durStr,
+          isFree: ep.isFree,
+          isLocked: !ep.isFree && isContentLocked(contentPlan, userPlan),
+          videoUrl: contentAccessible ? (ep.hlsUrl || ep.sourceVideoUrl || null) : null,
+          hlsUrl: contentAccessible ? (ep.hlsUrl || null) : null,
+        };
+        seasonsMap.get(ep.season)!.push(mappedEp);
+        flatEpisodes.push(mappedEp);
+      }
+
+      seasons = Array.from(seasonsMap.keys()).map(s => ({
+        seasonNumber: s,
+        episodes: seasonsMap.get(s),
+      }));
+    }
+
     return reply.send({
       success: true,
       data: {
         ...mappedItem,
-        episodes: [],
+        episodes: flatEpisodes,
+        seasons,
         related,
       },
     });

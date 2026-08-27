@@ -134,8 +134,9 @@ export const transcodeHlsMultiResolution = async (options: {
   sourceVideoUrl: string;
   startSeconds?: number;
   duration?: number;
+  folderType?: 'movies' | 'episodes';
 }) => {
-  const { id, sourceVideoUrl, startSeconds, duration } = options;
+  const { id, sourceVideoUrl, startSeconds, duration, folderType = 'movies' } = options;
 
   // ── Resolve input path (local file, or remote/S3 URL for ffmpeg) ────────
   let ffmpegInput = sourceVideoUrl;
@@ -152,8 +153,8 @@ export const transcodeHlsMultiResolution = async (options: {
 
   // ── Determine local HLS output folder ──────────────────────────────────
   const uploadsRoot = path.join(process.cwd(), 'uploads');
-  const hlsFolder    = path.join(uploadsRoot, 'hls', 'movies', id);
-  const localUrlBase = `/uploads/hls/movies/${id}`;
+  const hlsFolder    = path.join(uploadsRoot, 'hls', folderType, id);
+  const localUrlBase = `/uploads/hls/${folderType}/${id}`;
 
   // Clear any existing HLS files to prevent mixing old and new uploads
   if (fs.existsSync(hlsFolder)) {
@@ -385,16 +386,55 @@ export const processMovieInBackground = (movieId: Types.ObjectId | string, sourc
   });
 };
 
+export const processEpisodeHls = async (episodeId: Types.ObjectId | string, sourceVideoUrl: string) => {
+  try {
+    const EpisodeModel = (await import('../models/Episode')).EpisodeModel;
+    await EpisodeModel.findByIdAndUpdate(episodeId, { processingStatus: 'processing' });
+
+    const result = await transcodeHlsMultiResolution({
+      id: episodeId.toString(),
+      sourceVideoUrl,
+      folderType: 'episodes' // Important to isolate from movies
+    });
+
+    await EpisodeModel.findByIdAndUpdate(episodeId, {
+      hlsUrl:          result.hlsUrl,
+      videoQualities:  result.videoQualities,
+      processingStatus:'ready',
+      processingError: null,
+    });
+
+    logger.info({ episodeId, hlsUrl: result.hlsUrl }, 'Episode HLS processing complete');
+  } catch (error: any) {
+    logger.error({ episodeId, error }, 'Episode HLS processing failed');
+    const EpisodeModel = (await import('../models/Episode')).EpisodeModel;
+    await EpisodeModel.findByIdAndUpdate(episodeId, {
+      processingStatus: 'failed',
+      processingError: error.message || 'Unknown processing error',
+    });
+  }
+};
+
+export const processEpisodeInBackground = (episodeId: Types.ObjectId | string, sourceVideoUrl: string) => {
+  setImmediate(async () => {
+    await processEpisodeHls(episodeId, sourceVideoUrl);
+  });
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Auto-detect HLS qualities already on disk and sync them to MongoDB
 // ─────────────────────────────────────────────────────────────────────────────
 export const autoDetectAndSyncQualities = async (
-  id: Types.ObjectId | string
+  id: Types.ObjectId | string,
+  type: 'movie' | 'episode' = 'movie'
 ): Promise<any> => {
-  const doc = await MovieModel.findById(id).lean();
+  const Model = type === 'episode' ? (await import('../models/Episode')).EpisodeModel : MovieModel;
+  const folderType = type === 'episode' ? 'episodes' : 'movies';
+
+  const doc = await (Model as any).findById(id).lean();
   if (!doc) return null;
 
-  const hlsFolder = path.join(process.cwd(), 'uploads/hls', 'movies', id.toString());
+  const hlsFolder = path.join(process.cwd(), 'uploads/hls', folderType, id.toString());
   const masterPlaylistPath = path.join(hlsFolder, 'master.m3u8');
 
   if (fs.existsSync(masterPlaylistPath)) {
@@ -412,10 +452,10 @@ export const autoDetectAndSyncQualities = async (
     }
 
     if (detectedQualities.length > 0) {
-      const hlsUrl = `/uploads/hls/movies/${id}/master.m3u8`;
+      const hlsUrl = `/uploads/hls/${folderType}/${id}/master.m3u8`;
       const videoQualities = detectedQualities.map(q => ({
         quality: q,
-        url: `/uploads/hls/movies/${id}/${q}/playlist.m3u8`,
+        url: `/uploads/hls/${folderType}/${id}/${q}/playlist.m3u8`,
         size: getFolderSize(path.join(hlsFolder, q))
       }));
 
@@ -424,7 +464,7 @@ export const autoDetectAndSyncQualities = async (
       const newQualitiesStr = JSON.stringify(videoQualities);
       const hasDiff = currentQualitiesStr !== newQualitiesStr ||
                       doc.processingStatus !== 'ready' ||
-                      doc.hlsUrl !== hlsUrl;
+                      (doc as any).hlsUrl !== hlsUrl;
 
       if (hasDiff) {
         logger.info({ id: id.toString(), qualityCount: videoQualities.length }, 'Syncing auto-detected HLS qualities to MongoDB');
@@ -436,14 +476,16 @@ export const autoDetectAndSyncQualities = async (
           processingError: null,
         };
 
-        if ((doc as any).status === 'draft' || !(doc as any).status) {
-          updateData.status = 'published';
+        if ((doc as any).status === 'processing') {
+          updateData.status = 'draft';
         }
 
-        const updatedDoc = await MovieModel.findByIdAndUpdate(id, { $set: updateData }, { new: true }).lean();
+        const updatedDoc = await (Model as any).findByIdAndUpdate(id, { $set: updateData }, { new: true }).lean();
         return updatedDoc;
       }
+      return doc;
     }
   }
+
   return doc;
 };

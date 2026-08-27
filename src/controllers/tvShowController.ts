@@ -195,12 +195,6 @@ export const createTVShow = async (request: FastifyRequest, reply: FastifyReply)
       }
     }
 
-    if (isRawLocalVideo) {
-      import('../services/videoProcessor').then(({ processTVShowInBackground }) => {
-        processTVShowInBackground(tvShow._id, body.hlsUrl);
-      });
-    }
-
     return reply.status(201).send({
       success: true,
       data: {
@@ -266,12 +260,6 @@ export const updateTVShow = async (request: FastifyRequest, reply: FastifyReply)
 
     if (body.sections !== undefined) {
       await syncSections(id, body.sections);
-    }
-
-    if (isRawLocalVideo) {
-      import('../services/videoProcessor').then(({ processTVShowInBackground }) => {
-        processTVShowInBackground(tvShow._id, body.hlsUrl);
-      });
     }
 
     // Sync HLS qualities from disk if they exist but were not submitted/saved properly in update form

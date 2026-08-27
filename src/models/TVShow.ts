@@ -12,6 +12,7 @@ export interface ITVShow extends Document {
   posterImage?: string;
   trailerUrl?: string;
   sourceVideoUrl?: string;
+  contentType?: 'tvShow';
   genres: mongoose.Types.ObjectId[];
   categories: mongoose.Types.ObjectId[];
   sections: string[];
@@ -84,6 +85,7 @@ const TVShowSchema = new Schema<ITVShow>(
     posterImage: String,
     trailerUrl: String,
     sourceVideoUrl: String,
+    contentType: { type: String, default: 'tvShow' },
     genres: [{ type: Schema.Types.ObjectId, ref: 'Genre' }],
     categories: [{ type: Schema.Types.ObjectId, ref: 'Category' }],
     sections: { type: [String], default: [] },
