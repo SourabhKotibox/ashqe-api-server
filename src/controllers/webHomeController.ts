@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { MovieModel } from '../models/Movie';
+import { TVShowModel } from '../models/TVShow';
 import { GenreModel } from '../models/Genre';
 import { BannerModel } from '../models/Banner';
 import { logger } from '../lib/logger';
@@ -119,11 +120,17 @@ export const getWebHome = async (request: FastifyRequest, reply: FastifyReply) =
         }).sort({ position: 1, createdAt: -1 }).limit(10).lean();
 
         const contentIds = bannersRaw.map(b => b.contentId).filter(Boolean);
-        const movies = await MovieModel.find({ _id: { $in: contentIds } }).populate('genres', 'name').lean();
+        const [movies, tvShows] = await Promise.all([
+          MovieModel.find({ _id: { $in: contentIds } }).populate('genres', 'name').lean(),
+          TVShowModel.find({ _id: { $in: contentIds } }).populate('genres', 'name').lean()
+        ]);
 
         const contentMap = new Map();
         for (const movie of movies) {
-          contentMap.set(movie._id.toString(), movie);
+          contentMap.set(movie._id.toString(), { ...movie, contentType: 'movie' });
+        }
+        for (const show of tvShows) {
+          contentMap.set(show._id.toString(), { ...show, contentType: 'tvShow' });
         }
 
         return bannersRaw.map((banner: any) => {

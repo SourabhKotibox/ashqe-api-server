@@ -37,7 +37,7 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
       .populate('crew.director', 'name image designation')
       .lean();
 
-    if (!item) {
+    if (!item || item.status !== 'published') {
       return reply.status(404).send({ success: false, message: 'Content not found' });
     }
 

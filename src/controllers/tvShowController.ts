@@ -175,22 +175,24 @@ export const createTVShow = async (request: FastifyRequest, reply: FastifyReply)
     const tvShow = await TVShowModel.create(body);
     await syncSections(tvShow._id.toString(), body.sections);
 
-    // Trigger push notification to all users
-    try {
-      const { NotificationModel } = await import('../models/Notification');
-      await NotificationModel.create({
-        title: 'New TVShow Added! 🍿',
-        body: `Watch ${tvShow.title} now on the app!`,
-        type: 'content_release',
-        targetAudience: 'all',
-        contentId: tvShow._id,
-        status: 'sent',
-        metrics: { targetCount: 0, sentCount: 1, openedCount: 0, clickedCount: 0 },
-        sentAt: new Date(),
-        priority: 'high'
-      });
-    } catch (notifErr) {
-      logger.error({ notifErr }, 'Error sending new tvShow notification');
+    // Trigger push notification to all users — only if published
+    if (tvShow.status === 'published') {
+      try {
+        const { NotificationModel } = await import('../models/Notification');
+        await NotificationModel.create({
+          title: 'New Web Series Added! 🍿',
+          body: `Watch ${tvShow.title} now on the app!`,
+          type: 'content_release',
+          targetAudience: 'all',
+          contentId: tvShow._id,
+          status: 'sent',
+          metrics: { targetCount: 0, sentCount: 1, openedCount: 0, clickedCount: 0 },
+          sentAt: new Date(),
+          priority: 'high'
+        });
+      } catch (notifErr) {
+        logger.error({ notifErr }, 'Error sending new tvShow notification');
+      }
     }
 
     if (isRawLocalVideo) {
