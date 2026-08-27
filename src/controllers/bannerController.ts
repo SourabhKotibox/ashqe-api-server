@@ -4,6 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { BannerModel } from '../models/Banner';
 import { MovieModel } from '../models/Movie';
+import { TVShowModel } from '../models/TVShow';
 import uploadHandler from '../lib/uploadHandler';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -80,7 +81,7 @@ const ensureDefaultBannerImage = () => {
   return `/uploads/banners/${fileName}`;
 };
 
-const mapContent = (content: any) => ({
+const mapContent = (content: any, contentType: 'movie' | 'tvShow' = 'movie') => ({
   id: content._id.toString(),
   title: content.title,
   subtitle: content.shortDescription,
@@ -95,7 +96,7 @@ const mapContent = (content: any) => ({
   status: content.status,
   createdAt: content.createdAt,
   updatedAt: content.updatedAt,
-  contentType: 'movie',
+  contentType,
   hlsUrl: content.hlsUrl,
   videoUrl: content.videoUrl,
 });
@@ -104,18 +105,25 @@ const populateBannersContent = async (banners: any[]) => {
   const contentIds = banners.map((b) => b.contentId).filter(Boolean);
   if (contentIds.length === 0) return banners;
 
-  const movies = await MovieModel.find({ _id: { $in: contentIds } }).lean();
+  const [movies, tvShows] = await Promise.all([
+    MovieModel.find({ _id: { $in: contentIds } }).lean(),
+    TVShowModel.find({ _id: { $in: contentIds } }).lean(),
+  ]);
 
   // Create a map for quick lookups
   const contentMap = new Map();
   for (const movie of movies) {
-    contentMap.set(movie._id.toString(), { ...movie, contentType: 'movie' });
+    contentMap.set(movie._id.toString(), { ...movie, _contentType: 'movie' });
+  }
+  for (const show of tvShows) {
+    contentMap.set(show._id.toString(), { ...show, _contentType: 'tvShow' });
   }
 
   // Assign populated content back to banner
   for (const banner of banners) {
     if (banner.contentId) {
-      banner.contentId = contentMap.get(banner.contentId.toString()) || null;
+      const found = contentMap.get(banner.contentId.toString()) || null;
+      banner.contentId = found;
     }
   }
 
@@ -147,6 +155,7 @@ const resequenceBanners = async (movedBannerId?: string, targetPosition?: number
 const mapBanner = (banner: any) => {
   const content = banner.contentId;
   const thumbnail = content?.thumbnail || banner.imageUrl;
+  const contentType: 'movie' | 'tvShow' = content?._contentType || banner.contentType || 'movie';
   return {
     id: banner._id.toString(),
     title: banner.title,
@@ -162,7 +171,7 @@ const mapBanner = (banner: any) => {
     targetPlatforms: banner.targetPlatforms || [],
     startDate: banner.startDate,
     endDate: banner.endDate,
-    content: content ? mapContent(content) : undefined,
+    content: content ? mapContent(content, contentType) : undefined,
   };
 };
 
@@ -256,7 +265,7 @@ export const createBannerFromContent = async (request: FastifyRequest, reply: Fa
   try {
     const body = request.body as {
       contentId: string;
-      contentSource?: 'movie';
+      contentSource?: 'movie' | 'tvShow';
       title?: string;
       subtitle?: string;
       description?: string;
@@ -270,8 +279,12 @@ export const createBannerFromContent = async (request: FastifyRequest, reply: Fa
       return reply.status(400).send({ success: false, message: 'contentId is required' });
     }
 
-    // Fetch the source movie
-    const source: any = await MovieModel.findById(body.contentId).lean();
+    const isTVShow = body.contentSource === 'tvShow';
+
+    // Fetch the source content (movie or TV show)
+    const source: any = isTVShow
+      ? await TVShowModel.findById(body.contentId).lean()
+      : await MovieModel.findById(body.contentId).lean();
 
     if (!source) {
       return reply.status(404).send({ success: false, message: 'Source content not found' });
@@ -297,6 +310,7 @@ export const createBannerFromContent = async (request: FastifyRequest, reply: Fa
       ctaText: body.ctaText || 'Watch Now',
       ctaLink: body.ctaLink || '',
       contentId: body.contentId,
+      contentType: isTVShow ? 'tvShow' : 'movie',
       type: 'hero',
       position: Number.isFinite(body.position) ? body.position : 0,
       isActive: body.isActive ?? true,

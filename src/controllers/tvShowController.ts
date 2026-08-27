@@ -75,7 +75,6 @@ export const getAllTVShows = async (request: FastifyRequest, reply: FastifyReply
 
     const tvShowsWithId = tvShows.map((tvShow) => ({
       ...tvShow,
-        episodeCount,
       id: tvShow._id?.toString(),
     }));
 

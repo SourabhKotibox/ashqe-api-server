@@ -10,7 +10,7 @@ export interface IBanner extends Document {
   ctaLink?: string;
   contentId?: Types.ObjectId;
   type: 'hero' | 'featured' | 'promotional' | 'category';
-  contentType: 'movie';
+  contentType: 'movie' | 'tvShow';
   position: number;
   isActive: boolean;
   targetPlatforms: Array<'web' | 'mobile' | 'tv'>;
@@ -41,7 +41,7 @@ const BannerSchema = new Schema<IBanner>(
     },
     contentType: {
       type: String,
-      enum: ['movie'],
+      enum: ['movie', 'tvShow'],
       default: 'movie',
     },
     position: { type: Number, default: 0 },
