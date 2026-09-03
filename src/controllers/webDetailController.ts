@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { MovieModel } from '../models/Movie';
+import { buildShareUrl } from '../lib/config';
 import { logger } from '../lib/logger';
 import {
   canAccessContent,
@@ -190,7 +191,11 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
       requiresSubscription: requiresSubscription(contentPlan),
       planRequired: contentPlan,
       downloadAllowed: item.downloadAllowed !== false,
+      likes: item.likes || 0,
+      shares: item.shares || 0,
+      views: item.views || 0,
       episodeMeta: `HD • ${genreNames.join(', ')} • ${durationFormatted || 'N/A'}`,
+      shareUrl: buildShareUrl(item._id.toString()),
       isExclusive: item.isExclusive || false,
       featured: item.featured || false,
       trending: item.trending || false,
@@ -201,7 +206,8 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
     let related: any[] = [];
     if (item.genres && item.genres.length > 0) {
       const primaryGenreId = item.genres[0]._id;
-      const relatedRaw = await MovieModel.find({ genres: primaryGenreId, _id: { $ne: item._id }, status: 'published' })
+      const RelatedModel = isSeries ? (await import('../models/TVShow')).TVShowModel : MovieModel;
+      const relatedRaw = await RelatedModel.find({ genres: primaryGenreId, _id: { $ne: item._id }, status: 'published' })
         .sort({ views: -1 })
         .limit(5)
         .select('title thumbnail posterImage bannerImage year rating ageRating duration imdbRating isNewContent featured trending views createdAt')
@@ -216,7 +222,7 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
           title: r.title,
           poster: r.posterImage || r.thumbnail || '',
           backdrop: r.bannerImage || r.posterImage || r.thumbnail || '',
-          type: 'movie',
+          type: isSeries ? 'show' : 'movie',
           year: r.year?.toString() || new Date(r.createdAt).getFullYear().toString(),
           duration: dur || 'N/A',
           imdbRating: r.imdbRating?.toString() || (r.rating || '8.0'),
@@ -231,7 +237,6 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
       const { EpisodeModel } = await import('../models/Episode');
       const allEpisodes = await EpisodeModel.find({
         tvShowId: item._id,
-        processingStatus: 'ready'
       }).sort({ season: 1, episode: 1 }).lean();
 
       const seasonsMap = new Map<number, any[]>();
@@ -255,8 +260,9 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
           durationFormatted: durStr,
           isFree: ep.isFree,
           isLocked: !ep.isFree && isContentLocked(contentPlan, userPlan),
-          videoUrl: contentAccessible ? (ep.hlsUrl || ep.sourceVideoUrl || null) : null,
-          hlsUrl: contentAccessible ? (ep.hlsUrl || null) : null,
+          videoUrl: contentAccessible ? (ep.hlsUrl || ep.sourceVideoUrl || ep.videoUrl || null) : null,
+          hlsUrl: contentAccessible ? (ep.hlsUrl || ep.sourceVideoUrl || ep.videoUrl || null) : null,
+          sourceVideoUrl: contentAccessible ? (ep.sourceVideoUrl || null) : null,
         };
         seasonsMap.get(ep.season)!.push(mappedEp);
         flatEpisodes.push(mappedEp);

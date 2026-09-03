@@ -3,6 +3,7 @@ import { EpisodeModel } from '../models/Episode';
 import { TVShowModel } from '../models/TVShow';
 import { Types } from 'mongoose';
 import { logger } from '../lib/logger';
+import { isRawLocalVideo } from '../lib/contentResolver';
 
 export const getAllEpisodes = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
@@ -106,10 +107,11 @@ export const createEpisode = async (request: FastifyRequest, reply: FastifyReply
   try {
     const body = request.body as any;
 
-    // Check if the uploaded video is a raw MP4 or local media file (not HLS .m3u8)
-    const isLocalPath = body.sourceVideoUrl && !body.sourceVideoUrl.startsWith('http://') && !body.sourceVideoUrl.startsWith('https://');
-    const isRawLocalVideo = isLocalPath && !body.sourceVideoUrl.endsWith('.m3u8');
-    if (isRawLocalVideo) {
+    // Match movies: transcode local MP4/media files (hlsUrl or sourceVideoUrl) into HLS
+    const videoPath = (body.sourceVideoUrl || body.hlsUrl || '').trim();
+    const shouldProcessHls = isRawLocalVideo(videoPath);
+    if (shouldProcessHls) {
+      body.sourceVideoUrl = videoPath;
       body.processingStatus = 'queued';
     } else {
       body.processingStatus = 'ready';
@@ -117,9 +119,9 @@ export const createEpisode = async (request: FastifyRequest, reply: FastifyReply
 
     const episode = await EpisodeModel.create(body);
 
-    if (isRawLocalVideo && episode.sourceVideoUrl) {
+    if (shouldProcessHls && videoPath) {
       import('../services/videoProcessor').then(({ processEpisodeInBackground }) => {
-        processEpisodeInBackground(episode._id as Types.ObjectId, episode.sourceVideoUrl!);
+        processEpisodeInBackground(episode._id as Types.ObjectId, videoPath);
       });
     }
 
@@ -143,10 +145,11 @@ export const updateEpisode = async (request: FastifyRequest, reply: FastifyReply
       return reply.status(404).send({ success: false, error: 'Episode not found' });
     }
 
-    // Check if the sourceVideoUrl has changed to a new raw MP4 or local media file
-    const isLocalPath = body.sourceVideoUrl && !body.sourceVideoUrl.startsWith('http://') && !body.sourceVideoUrl.startsWith('https://');
-    const isRawLocalVideo = isLocalPath && !body.sourceVideoUrl.endsWith('.m3u8') && body.sourceVideoUrl !== (existingEpisode as any).sourceVideoUrl;
-    if (isRawLocalVideo) {
+    const videoPath = (body.sourceVideoUrl || body.hlsUrl || '').trim();
+    const prevPath = String((existingEpisode as any).sourceVideoUrl || (existingEpisode as any).hlsUrl || '');
+    const shouldProcessHls = isRawLocalVideo(videoPath) && videoPath !== prevPath;
+    if (shouldProcessHls) {
+      body.sourceVideoUrl = videoPath;
       body.processingStatus = 'queued';
     } else if (body.sourceVideoUrl || body.hlsUrl) {
       body.processingStatus = 'ready';
@@ -162,9 +165,9 @@ export const updateEpisode = async (request: FastifyRequest, reply: FastifyReply
       return reply.status(404).send({ success: false, error: 'Episode not found' });
     }
 
-    if (isRawLocalVideo && (episode as any).sourceVideoUrl) {
+    if (shouldProcessHls && videoPath) {
       import('../services/videoProcessor').then(({ processEpisodeInBackground }) => {
-        processEpisodeInBackground(new Types.ObjectId(id), (episode as any).sourceVideoUrl!);
+        processEpisodeInBackground(new Types.ObjectId(id), videoPath);
       });
     }
 
@@ -234,7 +237,7 @@ export const getSeasons = async (request: FastifyRequest, reply: FastifyReply) =
     };
 
     const matchFilter: any = {};
-    if (query.tvShowId) {
+    if (query.tvShowId && Types.ObjectId.isValid(query.tvShowId)) {
       matchFilter.tvShowId = new Types.ObjectId(query.tvShowId);
     }
 
@@ -252,17 +255,18 @@ export const getSeasons = async (request: FastifyRequest, reply: FastifyReply) =
         $group: {
           _id: { tvShowId: '$tvShowId', season: '$season' },
           episodeCount: { $sum: 1 },
+          thumbnail: { $first: '$thumbnail' },
         },
       },
       {
         $lookup: {
-          from: 'contents',
+          from: TVShowModel.collection.name,
           localField: '_id.tvShowId',
           foreignField: '_id',
           as: 'content',
         },
       },
-      { $unwind: '$content' },
+      { $unwind: { path: '$content', preserveNullAndEmptyArrays: true } },
       {
         $project: {
           _id: 0,
@@ -272,9 +276,9 @@ export const getSeasons = async (request: FastifyRequest, reply: FastifyReply) =
           tvShowId: '$_id.tvShowId',
           season: '$_id.season',
           episodeCount: 1,
-          showName: '$content.title',
-          thumbnail: '$content.thumbnail',
-          status: '$content.status',
+          showName: { $ifNull: ['$content.title', 'Unknown Series'] },
+          thumbnail: { $ifNull: ['$content.thumbnail', '$thumbnail'] },
+          status: { $ifNull: ['$content.status', 'draft'] },
         },
       },
       { $sort: { showName: 1, season: 1 } },

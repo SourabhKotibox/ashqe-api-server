@@ -1,12 +1,12 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import mongoose from 'mongoose';
-import { MovieModel } from '../models/Movie';
 import { UserViewModel } from '../models/UserView';
+import { TVShowModel } from '../models/TVShow';
 import { logger } from '../lib/logger';
+import { resolveContent } from '../lib/contentResolver';
 
 export const recordView = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
-    // ── 1. Verify JWT (required for views log unique check) ──────────────────
     let userId: string;
     let userObjectId: mongoose.Types.ObjectId;
     try {
@@ -20,25 +20,23 @@ export const recordView = async (request: FastifyRequest, reply: FastifyReply) =
       });
     }
 
-    // ── 2. Parse Params ──────────────────────────────────────────────────────
     const { contentId } = request.params as { contentId: string };
+    const body = (request.body || {}) as { contentType?: string; episodeId?: string };
+    const targetId = body.episodeId || contentId;
 
-    if (!mongoose.Types.ObjectId.isValid(contentId)) {
+    if (!mongoose.Types.ObjectId.isValid(targetId)) {
       return reply.status(400).send({ success: false, message: 'Invalid contentId.' });
     }
 
-    // ── 3. Verify Content Exists ─────────────────────────────────────────────
-    const content = await MovieModel.findById(contentId).select('views').lean();
-    if (!content) {
+    const resolved = await resolveContent(targetId, body.episodeId ? 'episode' : body.contentType);
+    if (!resolved) {
       return reply.status(404).send({ success: false, message: 'Content not found.' });
     }
 
-    // ── 4. Check & record view ───────────────────────────────────────────────
-    const existingView = await UserViewModel.findOne({ userId: userObjectId, contentId });
+    const existingView = await UserViewModel.findOne({ userId: userObjectId, contentId: targetId });
 
     if (existingView) {
-      // User has already viewed this content. Do NOT increment views.
-      const c = await MovieModel.findById(contentId).select('views').lean();
+      const c = await (resolved.model as any).findById(targetId).select('views').lean();
       return reply.send({
         success: true,
         message: 'View already recorded for this user (views count unchanged).',
@@ -49,20 +47,26 @@ export const recordView = async (request: FastifyRequest, reply: FastifyReply) =
       });
     }
 
-    // New view! Create log and increment views count in the DB.
     await UserViewModel.create({
       userId: userObjectId,
-      contentId,
-      contentModelType: 'Movie'
+      contentId: targetId,
+      contentModelType: resolved.type,
     });
 
-    const updated = await MovieModel.findByIdAndUpdate(
-      contentId,
+    const updated = await (resolved.model as any).findByIdAndUpdate(
+      targetId,
       { $inc: { views: 1 } },
       { new: true }
-    ).select('views').lean();
+    ).select('views tvShowId').lean();
 
-    logger.info({ userId, contentId }, 'User recorded a new view');
+    // Also increment parent series views when an episode is watched
+    if (resolved.type === 'Episode' && updated?.tvShowId) {
+      await TVShowModel.findByIdAndUpdate(updated.tvShowId, { $inc: { views: 1 } });
+    } else if (resolved.type !== 'Episode' && body.episodeId && mongoose.Types.ObjectId.isValid(contentId) && contentId !== targetId) {
+      await TVShowModel.findByIdAndUpdate(contentId, { $inc: { views: 1 } }).catch(() => null);
+    }
+
+    logger.info({ userId, contentId: targetId, type: resolved.type }, 'User recorded a new view');
 
     return reply.send({
       success: true,

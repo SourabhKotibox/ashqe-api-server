@@ -1,14 +1,13 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import mongoose from 'mongoose';
-import { MovieModel } from '../models/Movie';
 import { UserLikeModel } from '../models/UserLike';
 import { logger } from '../lib/logger';
+import { resolveContent } from '../lib/contentResolver';
 
 // POST /api/like/:contentId
 // Header: Authorization: Bearer <token>
 export const toggleLike = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
-    // ── 1. Verify JWT (required) ─────────────────────────────────────────────
     let userId: string;
     let userObjectId: mongoose.Types.ObjectId;
     try {
@@ -22,8 +21,8 @@ export const toggleLike = async (request: FastifyRequest, reply: FastifyReply) =
       });
     }
 
-    // ── 2. Parse params ──────────────────────────────────────────────────────
     const { contentId } = request.params as { contentId: string };
+    const body = (request.body || {}) as { contentType?: string };
 
     if (!mongoose.Types.ObjectId.isValid(contentId)) {
       return reply.status(400).send({
@@ -32,29 +31,27 @@ export const toggleLike = async (request: FastifyRequest, reply: FastifyReply) =
       });
     }
 
-    // ── 3. Verify movie exists ───────────────────────────────────────────────
-    const movie = await MovieModel.findById(contentId).select('likes').lean();
-    if (!movie) {
+    const resolved = await resolveContent(contentId, body.contentType);
+    if (!resolved) {
       return reply.status(404).send({
         success: false,
         message: 'Content not found.',
       });
     }
 
-    // ── 4. Toggle like ───────────────────────────────────────────────────────
+    const { type, model } = resolved;
     const existingLike = await UserLikeModel.findOne({ userId: userObjectId, contentId });
 
     if (existingLike) {
-      // Already liked → UNLIKE
       await UserLikeModel.deleteOne({ _id: existingLike._id });
-      const updated = await MovieModel.findByIdAndUpdate(
+      const updated = await (model as any).findByIdAndUpdate(
         contentId,
         { $inc: { likes: -1 } },
         { new: true }
       ).select('likes').lean();
       const likeCount = Math.max(0, updated?.likes ?? 0);
 
-      logger.info({ userId, contentId }, 'User unliked content');
+      logger.info({ userId, contentId, type }, 'User unliked content');
 
       return reply.send({
         success: true,
@@ -64,27 +61,26 @@ export const toggleLike = async (request: FastifyRequest, reply: FastifyReply) =
           isLikedByUser: false,
         },
       });
-    } else {
-      // Not liked → LIKE
-      await UserLikeModel.create({ userId: userObjectId, contentId, contentModelType: 'Movie' });
-      const updated = await MovieModel.findByIdAndUpdate(
-        contentId,
-        { $inc: { likes: 1 } },
-        { new: true }
-      ).select('likes').lean();
-      const likeCount = updated?.likes ?? 0;
-
-      logger.info({ userId, contentId }, 'User liked content');
-
-      return reply.send({
-        success: true,
-        message: 'Video liked successfully',
-        data: {
-          likeCount,
-          isLikedByUser: true,
-        },
-      });
     }
+
+    await UserLikeModel.create({ userId: userObjectId, contentId, contentModelType: type });
+    const updated = await (model as any).findByIdAndUpdate(
+      contentId,
+      { $inc: { likes: 1 } },
+      { new: true }
+    ).select('likes').lean();
+    const likeCount = updated?.likes ?? 0;
+
+    logger.info({ userId, contentId, type }, 'User liked content');
+
+    return reply.send({
+      success: true,
+      message: 'Video liked successfully',
+      data: {
+        likeCount,
+        isLikedByUser: true,
+      },
+    });
   } catch (error: any) {
     logger.error(error, 'Error toggling like');
     return reply.status(500).send({

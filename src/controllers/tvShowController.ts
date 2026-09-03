@@ -102,7 +102,7 @@ export const getTVShowById = async (request: FastifyRequest, reply: FastifyReply
     // Sync HLS qualities from disk if they exist but are missing in DB
     try {
       const { autoDetectAndSyncQualities } = await import('../services/videoProcessor');
-      await autoDetectAndSyncQualities(id);
+      await autoDetectAndSyncQualities(id, 'tvShow');
     } catch (syncErr) {
       logger.warn({ syncErr, id }, 'Failed to auto-detect and sync qualities for tvShow');
     }
@@ -174,6 +174,12 @@ export const createTVShow = async (request: FastifyRequest, reply: FastifyReply)
 
     const tvShow = await TVShowModel.create(body);
     await syncSections(tvShow._id.toString(), body.sections);
+
+    if (isRawLocalVideo) {
+      import('../services/videoProcessor').then(({ processTVShowInBackground }) => {
+        processTVShowInBackground(tvShow._id, body.hlsUrl);
+      });
+    }
 
     // Trigger push notification to all users — only if published
     if (tvShow.status === 'published') {
@@ -262,10 +268,16 @@ export const updateTVShow = async (request: FastifyRequest, reply: FastifyReply)
       await syncSections(id, body.sections);
     }
 
+    if (isRawLocalVideo) {
+      import('../services/videoProcessor').then(({ processTVShowInBackground }) => {
+        processTVShowInBackground(tvShow._id, body.hlsUrl);
+      });
+    }
+
     // Sync HLS qualities from disk if they exist but were not submitted/saved properly in update form
     try {
       const { autoDetectAndSyncQualities } = await import('../services/videoProcessor');
-      await autoDetectAndSyncQualities(id);
+      await autoDetectAndSyncQualities(id, 'tvShow');
     } catch (syncErr) {
       logger.warn({ syncErr, id }, 'Failed to auto-detect and sync qualities during tvShow update');
     }

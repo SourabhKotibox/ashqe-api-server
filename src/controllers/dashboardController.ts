@@ -3,13 +3,14 @@ import { UserModel } from '../models/User';
 import { SubscriptionModel } from '../models/Subscription';
 import { TransactionModel } from '../models/Transaction';
 import { MovieModel } from '../models/Movie';
+import { TVShowModel } from '../models/TVShow';
 import { GenreModel } from '../models/Genre';
 import { UserWatchProgressModel } from '../models/UserWatchProgress';
 import { ReviewModel } from '../models/Review';
 import { SettingsModel } from '../models/Settings';
 import { MediaFileModel } from '../models/MediaFile';
 import { AdModel } from '../models/Ad';
-import mongoose from 'mongoose';
+import { EpisodeModel } from '../models/Episode';
 
 // Helper to determine date range
 const getDateFilter = (query: any) => {
@@ -61,17 +62,25 @@ export const getDashboardStats = async (request: FastifyRequest, reply: FastifyR
       totalUsers,
       activeSubscriptions,
       totalMovies,
+      totalTVShows,
       totalTransactions,
       totalReviews,
       soonToExpire,
       totalSubscriptionRevenue,
       storageAgg,
-      viewsAgg,
+      movieViewsAgg,
+      showViewsAgg,
+      movieLikesAgg,
+      showLikesAgg,
+      episodeStatsAgg,
+      userWatchTimeAgg,
+      watchHoursAgg,
       adStats,
     ] = await Promise.all([
       UserModel.countDocuments(),
       SubscriptionModel.countDocuments({ status: 'active' }),
       MovieModel.countDocuments(),
+      TVShowModel.countDocuments(),
       TransactionModel.countDocuments(),
       ReviewModel.countDocuments(),
       SubscriptionModel.countDocuments({
@@ -88,7 +97,25 @@ export const getDashboardStats = async (request: FastifyRequest, reply: FastifyR
         { $group: { _id: null, total: { $sum: '$fileSize' }, count: { $sum: 1 } } },
       ]),
       MovieModel.aggregate([
-        { $group: { _id: null, total: { $sum: '$views' } } },
+        { $group: { _id: null, total: { $sum: '$views' }, likes: { $sum: '$likes' } } },
+      ]),
+      TVShowModel.aggregate([
+        { $group: { _id: null, total: { $sum: '$views' }, likes: { $sum: '$likes' } } },
+      ]),
+      MovieModel.aggregate([
+        { $group: { _id: null, total: { $sum: '$likes' } } },
+      ]),
+      TVShowModel.aggregate([
+        { $group: { _id: null, total: { $sum: '$likes' } } },
+      ]),
+      EpisodeModel.aggregate([
+        { $group: { _id: null, views: { $sum: '$views' }, likes: { $sum: '$likes' } } },
+      ]),
+      UserModel.aggregate([
+        { $group: { _id: null, seconds: { $sum: '$totalWatchTime' } } },
+      ]),
+      UserWatchProgressModel.aggregate([
+        { $group: { _id: null, seconds: { $sum: '$progressSeconds' } } },
       ]),
       AdModel.aggregate([
         {
@@ -103,7 +130,13 @@ export const getDashboardStats = async (request: FastifyRequest, reply: FastifyR
     ]);
 
     const subscriptionRevenue = totalSubscriptionRevenue[0]?.total || 0;
-    const totalViews = viewsAgg[0]?.total || 0;
+    const movieViews = movieViewsAgg[0]?.total || 0;
+    const seriesViews = (showViewsAgg[0]?.total || 0) + (episodeStatsAgg[0]?.views || 0);
+    const movieLikes = movieLikesAgg[0]?.total || 0;
+    const seriesLikes = (showLikesAgg[0]?.total || 0) + (episodeStatsAgg[0]?.likes || 0);
+    const totalViews = movieViews + seriesViews;
+    const totalLikes = movieLikes + seriesLikes;
+    const totalWatchHours = Math.round((((userWatchTimeAgg[0]?.seconds || 0) || (watchHoursAgg[0]?.seconds || 0)) / 3600) * 10) / 10;
     const adImpressions = adStats[0]?.impressions || 0;
     const adClicks = adStats[0]?.clicks || 0;
     const bytes = storageAgg[0]?.total || 0;
@@ -133,9 +166,17 @@ export const getDashboardStats = async (request: FastifyRequest, reply: FastifyR
         totalReviews,
         totalStorageUsage: formatBytes(bytes),
         mediaFileCount: mediaCount,
-        restContent: totalMovies,
+        restContent: totalMovies + totalTVShows,
+        totalMovies,
+        totalTVShows,
         subscriptionRevenue: formatValue(subscriptionRevenue),
         totalViews,
+        movieViews,
+        seriesViews,
+        totalLikes,
+        movieLikes,
+        seriesLikes,
+        totalWatchHours,
         adImpressions,
         adClicks,
         adCtr: adImpressions > 0 ? ((adClicks / adImpressions) * 100).toFixed(2) : '0.00',
@@ -267,10 +308,11 @@ export const getTopGenresData = async (_request: FastifyRequest, reply: FastifyR
     // In a perfectly optimized DB, we would aggregate MovieModel views by genre array.
     // For simplicity, we'll aggregate Movies and sum their views by genre.
     const movies = await MovieModel.find({ status: 'published' }).select('genres views').lean();
+    const shows = await TVShowModel.find({ status: 'published' }).select('genres views').lean();
 
     const genreViews: Record<string, number> = {};
 
-    for (const m of movies) {
+    for (const m of [...movies, ...shows]) {
       for (const gId of m.genres || []) {
         const idStr = gId.toString();
         genreViews[idStr] = (genreViews[idStr] || 0) + (m.views || 0);

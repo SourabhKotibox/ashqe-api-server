@@ -2,8 +2,10 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import mongoose from 'mongoose';
 import { UserWishlistModel } from '../models/UserWishlist';
 import { MovieModel } from '../models/Movie';
+import { TVShowModel } from '../models/TVShow';
 import { UserModel } from '../models/User';
 import { logger } from '../lib/logger';
+import { resolveContent } from '../lib/contentResolver';
 
 export const toggleWishlist = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
@@ -22,22 +24,16 @@ export const toggleWishlist = async (request: FastifyRequest, reply: FastifyRepl
       return reply.status(400).send({ success: false, message: 'type or contentType is required' });
     }
 
-    const contentModelType = 'Movie';
+    const resolved = await resolveContent(contentId, rawType);
+    if (!resolved) {
+      return reply.status(404).send({ success: false, message: 'Content not found' });
+    }
 
-    // Fallback or explicit auth extraction
     const user = (request as any).user;
     if (!user || !user.id) {
       return reply.status(401).send({ success: false, message: 'Unauthorized' });
     }
-    const userId = user.id;
-    // Cast userId string to ObjectId for all DB queries
-    const userObjectId = new mongoose.Types.ObjectId(userId);
-
-    // Verify content exists
-    const content = await MovieModel.findById(contentId).select('_id');
-    if (!content) {
-      return reply.status(404).send({ success: false, message: 'Content not found' });
-    }
+    const userObjectId = new mongoose.Types.ObjectId(user.id);
 
     const existingWishlist = await UserWishlistModel.findOne({ userId: userObjectId, contentId, profileId });
 
@@ -60,7 +56,7 @@ export const toggleWishlist = async (request: FastifyRequest, reply: FastifyRepl
       const newWishlist = await UserWishlistModel.create({
         userId: userObjectId,
         contentId,
-        contentModelType,
+        contentModelType: resolved.type,
         profileId,
       });
       await UserModel.findByIdAndUpdate(userObjectId, { $inc: { watchlistCount: 1 } });
@@ -109,17 +105,22 @@ export const getWishlist = async (request: FastifyRequest, reply: FastifyReply) 
     // Fetch actual content for the wishlist items
     const selectFields = 'title description shortDescription thumbnail bannerImage posterImage year rating ageRating duration imdbRating type createdAt';
 
-    const movieIds = wishlistItems.map(i => i.contentId);
+    const ids = wishlistItems.map(i => i.contentId);
+    const [movies, shows] = ids.length > 0
+      ? await Promise.all([
+          MovieModel.find({ _id: { $in: ids } }).select(selectFields).lean(),
+          TVShowModel.find({ _id: { $in: ids } }).select(selectFields).lean(),
+        ])
+      : [[], []];
 
-    const movies = movieIds.length > 0
-      ? await MovieModel.find({ _id: { $in: movieIds } }).select(selectFields).lean()
-      : [];
-
-    const movieMap = new Map(movies.map(m => [m._id.toString(), m]));
+    const contentMap = new Map<string, any>();
+    movies.forEach((m: any) => contentMap.set(m._id.toString(), { ...m, _kind: 'movie' }));
+    shows.forEach((s: any) => contentMap.set(s._id.toString(), { ...s, _kind: 'show' }));
 
     const mappedItems = wishlistItems.map(item => {
-      const c: any = movieMap.get(item.contentId.toString());
+      const c: any = contentMap.get(item.contentId.toString());
       if (!c) return null;
+      const isShow = c._kind === 'show' || item.contentModelType === 'TVShow';
 
       return {
         id: c._id.toString(),
@@ -127,8 +128,8 @@ export const getWishlist = async (request: FastifyRequest, reply: FastifyReply) 
         title: c.title,
         poster: c.posterImage || c.thumbnail || '',
         backdrop: c.bannerImage || c.thumbnail || '',
-        type: 'movie',
-        contentType: 'movie',
+        type: isShow ? 'show' : 'movie',
+        contentType: isShow ? 'show' : 'movie',
         year: c.year?.toString() || new Date(c.createdAt).getFullYear().toString(),
         duration: c.duration ? `${c.duration}m` : '120m',
         imdbRating: c.imdbRating?.toString() || (c.rating || '8.0'),

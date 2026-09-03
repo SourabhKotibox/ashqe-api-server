@@ -11,6 +11,7 @@ import { UserDownloadModel } from '../models/UserDownload';
 import { UserWishlistModel } from '../models/UserWishlist';
 import { UserLikeModel } from '../models/UserLike';
 import { MovieModel } from '../models/Movie';
+import { TVShowModel } from '../models/TVShow';
 import { UserWatchProgressModel } from '../models/UserWatchProgress';
 import { ReviewModel } from '../models/Review';
 import { SubscriptionModel } from '../models/Subscription';
@@ -221,16 +222,17 @@ export const getAppProfile = async (request: FastifyRequest, reply: FastifyReply
         .lean();
 
       if (wishlistItems.length > 0) {
-        const wMovieIds = wishlistItems.map(i => i.contentId);
-
-        const wMovies = wMovieIds.length > 0
-          ? await MovieModel.find({ _id: { $in: wMovieIds } }).select('title thumbnail bannerImage posterImage year rating duration views type').lean()
-          : [];
-
-        const wMovieMap = new Map(wMovies.map(m => [m._id.toString(), m]));
+        const wIds = wishlistItems.map(i => i.contentId);
+        const [wMovies, wShows] = await Promise.all([
+          MovieModel.find({ _id: { $in: wIds } }).select('title thumbnail bannerImage posterImage year rating duration views type').lean(),
+          TVShowModel.find({ _id: { $in: wIds } }).select('title thumbnail bannerImage posterImage year rating duration views').lean(),
+        ]);
+        const wMap = new Map<string, any>();
+        wMovies.forEach((m: any) => wMap.set(m._id.toString(), { ...m, type: 'movie' }));
+        wShows.forEach((s: any) => wMap.set(s._id.toString(), { ...s, type: 'show' }));
 
         wishlistList = wishlistItems.map(item => {
-          const c: any = wMovieMap.get(item.contentId.toString());
+          const c: any = wMap.get(item.contentId.toString());
           if (!c) return null;
 
           return {
@@ -239,7 +241,7 @@ export const getAppProfile = async (request: FastifyRequest, reply: FastifyReply
             thumbnail: c.thumbnail,
             bannerImage: c.bannerImage || null,
             posterImage: c.posterImage || c.thumbnail || '',
-            type: 'movie',
+            type: c.type || 'movie',
             views: c.views || 0,
             year: c.year || null,
             rating: c.rating || null,
@@ -261,16 +263,17 @@ export const getAppProfile = async (request: FastifyRequest, reply: FastifyReply
       }));
 
       if (likedItems.length > 0) {
-        const lMovieIds = likedItems.map(i => i.contentId);
-
-        const lMovies = lMovieIds.length > 0
-          ? await MovieModel.find({ _id: { $in: lMovieIds } }).select('title thumbnail bannerImage posterImage year rating duration views type').lean()
-          : [];
-
-        const lMovieMap = new Map(lMovies.map(m => [m._id.toString(), m]));
+        const lIds = likedItems.map(i => i.contentId);
+        const [lMovies, lShows] = await Promise.all([
+          MovieModel.find({ _id: { $in: lIds } }).select('title thumbnail bannerImage posterImage year rating duration views type').lean(),
+          TVShowModel.find({ _id: { $in: lIds } }).select('title thumbnail bannerImage posterImage year rating duration views').lean(),
+        ]);
+        const lMap = new Map<string, any>();
+        lMovies.forEach((m: any) => lMap.set(m._id.toString(), { ...m, type: 'movie' }));
+        lShows.forEach((s: any) => lMap.set(s._id.toString(), { ...s, type: 'show' }));
 
         likesList = likedItems.map(item => {
-          const c: any = lMovieMap.get(item.contentId.toString());
+          const c: any = lMap.get(item.contentId.toString());
           if (!c) return null;
           return {
             id: c._id.toString(),
@@ -278,7 +281,7 @@ export const getAppProfile = async (request: FastifyRequest, reply: FastifyReply
             thumbnail: c.thumbnail,
             bannerImage: c.bannerImage || null,
             posterImage: c.posterImage || c.thumbnail || '',
-            type: 'movie',
+            type: c.type || 'movie',
             views: c.views || 0,
             year: c.year || null,
             rating: c.rating || null,

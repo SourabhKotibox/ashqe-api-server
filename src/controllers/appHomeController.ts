@@ -1,6 +1,8 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { BannerModel } from '../models/Banner';
 import { MovieModel } from '../models/Movie';
+import { TVShowModel } from '../models/TVShow';
+import { EpisodeModel } from '../models/Episode';
 import { SectionModel } from '../models/Section';
 import { UserLikeModel } from '../models/UserLike';
 import { UserModel } from '../models/User';
@@ -56,6 +58,7 @@ const mapContentItem = (
   likeCount = 0,
   isLikedByUser = false,
   userPlan = 'free',
+  type: 'movie' | 'show' = 'movie',
 ) => {
   const contentPlan = item.planRequired || item.plan || 'free';
   const locked = isContentLocked(contentPlan, userPlan);
@@ -68,7 +71,8 @@ const mapContentItem = (
     thumbnail: resolveUrl(item.thumbnail),
     bannerImage: resolveUrl(item.bannerImage),
     posterImage: resolveUrl(item.posterImage),
-    type: 'movie',
+    type,
+    contentType: type === 'show' ? 'tvShow' : 'movie',
     genres: (item.genres || []).map((g: any) => g.name || g),
     genresText: (item.genres || []).map((g: any) => g.name || g).join(' & '),
     languages: (item.languages || []).map((l: any) => l.name || l),
@@ -104,11 +108,18 @@ const populateBannersContent = async (banners: any[]) => {
     .populate('languages', 'name')
     .populate('genres', 'name')
     .lean();
+  const tvShows = await TVShowModel.find({ _id: { $in: contentIds } })
+    .populate('languages', 'name')
+    .populate('genres', 'name')
+    .lean();
 
   // Create a map for quick lookups
   const contentMap = new Map();
   for (const movie of movies) {
     contentMap.set(movie._id.toString(), { ...movie, type: 'movie' });
+  }
+  for (const show of tvShows) {
+    contentMap.set(show._id.toString(), { ...show, type: 'show' });
   }
 
   // Assign populated content back to banner
@@ -142,7 +153,7 @@ const mapBanner = (
     ctaText: banner.ctaText,
     ctaLink: banner.ctaLink,
     contentId: banner.contentId?._id?.toString(),
-    content: content ? mapContentItem(content, resolveUrl, likeCount, isLikedByUser, userPlan) : undefined,
+    content: content ? mapContentItem(content, resolveUrl, likeCount, isLikedByUser, userPlan, content.type === 'show' ? 'show' : 'movie') : undefined,
     type: banner.type,
     contentType: banner.contentType,
     position: banner.position,
@@ -270,10 +281,7 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
     // ── Fetch Continue Watching Progress ──────────────────────────────────────
     const watchProgressList: any[] = [];
     if (userId) {
-      const queryParams: any = {
-        userId,
-        contentModelType: 'Movie',
-      };
+      const queryParams: any = { userId };
       if (profileId) {
         queryParams.profileId = profileId;
       }
@@ -337,23 +345,46 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
     // Map Continue Watching section
     const continueWatchingShows: any[] = [];
     if (watchProgressList.length > 0) {
-      const contentIds = watchProgressList.map(p => p.contentId);
-      const items = await MovieModel.find({ _id: { $in: contentIds } }).lean();
+      const movieIds = watchProgressList.filter(p => p.contentModelType === 'Movie').map(p => p.contentId);
+      const showIds = watchProgressList.filter(p => p.contentModelType === 'TVShow').map(p => p.contentId);
+      const episodeIds = watchProgressList.filter(p => p.contentModelType === 'Episode').map(p => p.contentId);
 
-      const itemsMap = new Map<string, any>();
-      items.forEach(item => itemsMap.set(item._id.toString(), item));
+      const [movies, shows, episodes] = await Promise.all([
+        movieIds.length ? MovieModel.find({ _id: { $in: movieIds } }).lean() : Promise.resolve([]),
+        showIds.length ? TVShowModel.find({ _id: { $in: showIds } }).lean() : Promise.resolve([]),
+        episodeIds.length ? EpisodeModel.find({ _id: { $in: episodeIds } }).lean() : Promise.resolve([]),
+      ]);
+
+      const parentShowIds = (episodes as any[]).map((e: any) => e.tvShowId).filter(Boolean);
+      const parentShows = parentShowIds.length
+        ? await TVShowModel.find({ _id: { $in: parentShowIds } }).lean()
+        : [];
+
+      const itemsMap = new Map<string, { item: any; type: 'movie' | 'show'; episode?: any }>();
+      (movies as any[]).forEach((item: any) => itemsMap.set(item._id.toString(), { item, type: 'movie' }));
+      (shows as any[]).forEach((item: any) => itemsMap.set(item._id.toString(), { item, type: 'show' }));
+      const parentMap = new Map((parentShows as any[]).map((s: any) => [s._id.toString(), s]));
+      (episodes as any[]).forEach((ep: any) => {
+        const parent = parentMap.get(ep.tvShowId?.toString());
+        if (parent) itemsMap.set(ep._id.toString(), { item: parent, type: 'show', episode: ep });
+      });
 
       for (const progress of watchProgressList) {
-        const item = itemsMap.get(progress.contentId.toString());
-        if (!item) continue;
+        const entry = itemsMap.get(progress.contentId.toString());
+        if (!entry) continue;
 
-        const cid = item._id.toString();
-        const likeCount = item.likes || 0;
+        const cid = entry.item._id.toString();
+        const likeCount = entry.item.likes || 0;
         const isLikedByUser = likedContentIdSet.has(cid);
 
-        const mapped: any = mapContentItem(item, resolveUrl, likeCount, isLikedByUser, userPlan);
+        const mapped: any = mapContentItem(entry.item, resolveUrl, likeCount, isLikedByUser, userPlan, entry.type);
+        if (entry.episode) {
+          mapped.episodeId = entry.episode._id.toString();
+          mapped.episodeTitle = entry.episode.title;
+          mapped.season = entry.episode.season;
+          mapped.episode = entry.episode.episode;
+        }
 
-        // Inject watch progress detail
         mapped.watchProgress = {
           progressSeconds: progress.progressSeconds,
           durationSeconds: progress.durationSeconds,

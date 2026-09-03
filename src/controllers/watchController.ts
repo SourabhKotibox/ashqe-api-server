@@ -1,6 +1,8 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import mongoose from 'mongoose';
 import { MovieModel } from '../models/Movie';
+import { TVShowModel } from '../models/TVShow';
+import { EpisodeModel } from '../models/Episode';
 import { UserLikeModel } from '../models/UserLike';
 import { UserWishlistModel } from '../models/UserWishlist';
 import { UserDownloadModel } from '../models/UserDownload';
@@ -154,23 +156,63 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
 
     // Cast userId to ObjectId once for ALL DB lookups
     const userObjectId = userId ? new mongoose.Types.ObjectId(userId) : null;
+    const query = request.query as { season?: string; episode?: string; episodeId?: string };
 
-    // Sync HLS qualities from disk if they exist but are missing in DB
-    try {
-      const { autoDetectAndSyncQualities } = await import('../services/videoProcessor');
-      await autoDetectAndSyncQualities(contentId);
-    } catch (syncErr) {
-      logger.warn({ syncErr, contentId }, 'Failed to auto-detect and sync qualities for movie in getWatchData');
+    const populateMeta = (model: any, id: string) =>
+      model.findById(id)
+        .populate('genres', 'name')
+        .populate('cast.actor', 'name image')
+        .populate('crew.director', 'name image')
+        .lean();
+
+    let content: any = await populateMeta(MovieModel, contentId);
+    let isSeries = false;
+    let currentEpisodeDoc: any = null;
+
+    if (!content) {
+      const episodeById = await EpisodeModel.findById(query.episodeId || contentId).lean();
+      let showId = episodeById?.tvShowId?.toString();
+      if (!showId) {
+        const asShow = await populateMeta(TVShowModel, contentId);
+        if (asShow) showId = asShow._id.toString();
+      }
+      if (showId) {
+        content = await populateMeta(TVShowModel, showId);
+        isSeries = !!content;
+        if (content) {
+          if (query.episodeId && mongoose.Types.ObjectId.isValid(query.episodeId)) {
+            currentEpisodeDoc = await EpisodeModel.findById(query.episodeId).lean();
+          } else if (episodeById && episodeById.tvShowId?.toString() === showId) {
+            currentEpisodeDoc = episodeById;
+          } else {
+            const seasonNum = Math.max(1, Number(query.season || 1));
+            const episodeNum = Math.max(1, Number(query.episode || 1));
+            currentEpisodeDoc =
+              (await EpisodeModel.findOne({ tvShowId: content._id, season: seasonNum, episode: episodeNum }).lean()) ||
+              (await EpisodeModel.findOne({ tvShowId: content._id }).sort({ season: 1, episode: 1 }).lean());
+          }
+        }
+      }
     }
-
-    const content: any = await MovieModel.findById(contentId)
-      .populate('genres', 'name')
-      .populate('cast.actor', 'name image')
-      .populate('crew.director', 'name image')
-      .lean();
 
     if (!content || content.status !== 'published') {
       return reply.status(404).send({ success: false, message: 'Content not found.' });
+    }
+
+    let playbackTarget: any = isSeries ? (currentEpisodeDoc || content) : content;
+    const playbackType = isSeries && currentEpisodeDoc ? 'episode' : isSeries ? 'tvShow' : 'movie';
+
+    try {
+      const { autoDetectAndSyncQualities } = await import('../services/videoProcessor');
+      const synced = await autoDetectAndSyncQualities(playbackTarget._id, playbackType);
+      if (synced) playbackTarget = synced;
+      else {
+        const Model = playbackType === 'episode' ? EpisodeModel : playbackType === 'tvShow' ? TVShowModel : MovieModel;
+        const refreshed = await Model.findById(playbackTarget._id).lean();
+        if (refreshed) playbackTarget = refreshed;
+      }
+    } catch (syncErr) {
+      logger.warn({ syncErr, contentId }, 'Failed to auto-detect and sync qualities in getWatchData');
     }
 
     const contentPlan = content.planRequired || 'free';
@@ -206,10 +248,10 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
     }));
 
     // ── Fetch Related Content ─────────────────────────────────────────────
-    // Simple related logic: Same genre, excluding current item, limit 5
     let relatedContents: any[] = [];
     if (content.genres && content.genres.length > 0) {
-      const related = await MovieModel.find({
+      const RelatedModel = isSeries ? TVShowModel : MovieModel;
+      const related = await RelatedModel.find({
         _id: { $ne: content._id },
         status: 'published',
         genres: { $in: content.genres },
@@ -219,7 +261,7 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
         title: r.title,
         thumbnail: toAbsoluteUrl(request, r.thumbnail),
         duration: r.duration,
-        type: 'movie',
+        type: isSeries ? 'show' : 'movie',
       }));
     }
 
@@ -227,8 +269,9 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
     const isAccessible = canAccessContent(contentPlan, userPlan);
 
     let watchProgress = null;
+    const progressTargetId = playbackTarget._id;
     if (userObjectId) {
-      const progressDoc = await UserWatchProgressModel.findOne({ userId: userObjectId, contentId: content._id, profileId }).lean();
+      const progressDoc = await UserWatchProgressModel.findOne({ userId: userObjectId, contentId: progressTargetId, profileId }).lean();
       if (progressDoc) {
         watchProgress = {
           progressSeconds: progressDoc.progressSeconds,
@@ -239,16 +282,21 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
       }
     }
 
+    const playableHls = playbackTarget.hlsUrl || playbackTarget.videoUrl || playbackTarget.sourceVideoUrl || null;
     const currentVideo = {
-      id: content._id.toString(),
-      title: content.title,
-      duration: content.duration || null,
-      isFree: String(contentPlan).toLowerCase() === 'free',
+      id: playbackTarget._id.toString(),
+      title: isSeries && currentEpisodeDoc
+        ? currentEpisodeDoc.title
+        : content.title,
+      season: currentEpisodeDoc?.season || null,
+      episode: currentEpisodeDoc?.episode || null,
+      duration: playbackTarget.duration || content.duration || null,
+      isFree: String(contentPlan).toLowerCase() === 'free' || !!currentEpisodeDoc?.isFree,
       isLocked: !isAccessible,
-      hlsUrl: isAccessible ? toAbsoluteUrl(request, content.hlsUrl) : null,
-      trailerUrl: toAbsoluteUrl(request, content.trailerUrl),
+      hlsUrl: isAccessible ? toAbsoluteUrl(request, playableHls) : null,
+      trailerUrl: toAbsoluteUrl(request, currentEpisodeDoc?.trailerUrl || content.trailerUrl),
       videoSettings: isAccessible
-        ? buildNamedQualities(request, content.hlsUrl, content.videoQualities, userPlan)
+        ? buildNamedQualities(request, playableHls, playbackTarget.videoQualities || content.videoQualities, userPlan)
         : null,
       watchProgress,
     };
@@ -257,7 +305,24 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
     const minutes = content.duration ? Math.floor((content.duration % 3600) / 60) : 0;
     const durationStr = hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
     const genresText = (content.genres || []).map((g: any) => g.name || g).join(', ');
-    const episodeMeta = `HD • ${genresText} • ${durationStr}`;
+    const episodeMeta = currentEpisodeDoc
+      ? `S${currentEpisodeDoc.season}E${currentEpisodeDoc.episode} • HD • ${genresText}`
+      : `HD • ${genresText} • ${durationStr}`;
+
+    let episodes: any[] = [];
+    if (isSeries) {
+      const allEps = await EpisodeModel.find({ tvShowId: content._id }).sort({ season: 1, episode: 1 }).lean();
+      episodes = allEps.map((ep: any) => ({
+        id: ep._id.toString(),
+        season: ep.season,
+        episode: ep.episode,
+        title: ep.title,
+        duration: ep.duration || null,
+        thumbnail: toAbsoluteUrl(request, ep.thumbnail || content.thumbnail),
+        isFree: !!ep.isFree,
+        hlsUrl: isAccessible ? toAbsoluteUrl(request, ep.hlsUrl || ep.sourceVideoUrl) : null,
+      }));
+    }
 
     // ── Final Output ──────────────────────────────────────────────────────
     return reply.send({
@@ -273,7 +338,8 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
           genres: content.genres || [],
           genresText: (content.genres || []).join(' & '),
           languages: content.languages || [],
-          type: 'movie',
+          type: isSeries ? 'show' : 'movie',
+          contentType: isSeries ? 'tvShow' : 'movie',
 
           episodeMeta,
 
@@ -293,6 +359,7 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
           cast,
           crew,
           related: relatedContents,
+          episodes,
         },
         currentEpisode: currentVideo,
         playbackSpeeds: [

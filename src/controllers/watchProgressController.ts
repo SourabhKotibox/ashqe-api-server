@@ -1,13 +1,14 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import mongoose from 'mongoose';
 import { UserWatchProgressModel } from '../models/UserWatchProgress';
-import { MovieModel } from '../models/Movie';
+import { UserModel } from '../models/User';
 import { logger } from '../lib/logger';
 import {
   canAccessContent,
   isContentLocked,
   resolveEffectiveUserPlan,
 } from '../lib/subscriptionAccess';
+import { resolveContent } from '../lib/contentResolver';
 
 export const saveWatchProgress = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
@@ -18,37 +19,44 @@ export const saveWatchProgress = async (request: FastifyRequest, reply: FastifyR
 
     const body = (request.body || {}) as {
       contentId?: string;
+      episodeId?: string;
       progressSeconds?: number;
       durationSeconds?: number;
+      contentType?: string;
     };
-    const { contentId, progressSeconds, durationSeconds } = body;
+    const { contentId, episodeId, progressSeconds, durationSeconds, contentType } = body;
     const profileId = request.headers['x-profile-id'] as string | undefined;
 
     if (!contentId || progressSeconds === undefined || durationSeconds === undefined) {
       return reply.status(400).send({ success: false, message: 'contentId, progressSeconds, and durationSeconds are required.' });
     }
 
-    if (!mongoose.Types.ObjectId.isValid(contentId)) {
+    const progressId = episodeId || contentId;
+    if (!mongoose.Types.ObjectId.isValid(progressId)) {
       return reply.status(400).send({ success: false, message: 'Invalid contentId.' });
     }
 
-    const movieDoc = await MovieModel.findById(contentId).lean();
-    if (!movieDoc) {
-      return reply.status(404).send({ success: false, message: 'Movie not found.' });
+    const resolved = await resolveContent(progressId, episodeId ? 'episode' : contentType);
+    if (!resolved) {
+      return reply.status(404).send({ success: false, message: 'Content not found.' });
     }
 
     const filter = {
       userId: new mongoose.Types.ObjectId(userId),
-      contentId: new mongoose.Types.ObjectId(contentId),
+      contentId: new mongoose.Types.ObjectId(progressId),
       profileId: profileId || null,
     };
 
-    const percent = Math.min(100, Math.max(0, Math.round((progressSeconds / durationSeconds) * 100)));
+    const percent = Math.min(100, Math.max(0, Math.round((progressSeconds / Math.max(1, durationSeconds)) * 100)));
+
+    const previous = await UserWatchProgressModel.findOne(filter).select('progressSeconds').lean();
+    const prevSeconds = previous?.progressSeconds || 0;
+    const delta = Math.max(0, progressSeconds - prevSeconds);
 
     const progressDoc = await UserWatchProgressModel.findOneAndUpdate(
       filter,
       {
-        contentModelType: 'Movie',
+        contentModelType: resolved.type,
         progressSeconds,
         durationSeconds,
         progressPercent: percent,
@@ -56,6 +64,10 @@ export const saveWatchProgress = async (request: FastifyRequest, reply: FastifyR
       },
       { new: true, upsert: true }
     );
+
+    if (delta > 0) {
+      await UserModel.findByIdAndUpdate(userId, { $inc: { totalWatchTime: delta } });
+    }
 
     return reply.send({
       success: true,
@@ -78,15 +90,16 @@ export const getWatchProgressItem = async (request: FastifyRequest, reply: Fasti
       return reply.status(401).send({ success: false, message: 'Unauthorized.' });
     }
 
-    const { contentId, profileId } = request.query as { contentId?: string; profileId?: string };
+    const { contentId, profileId, episodeId } = request.query as { contentId?: string; profileId?: string; episodeId?: string };
 
-    if (!contentId || !mongoose.Types.ObjectId.isValid(contentId)) {
+    const lookupId = episodeId || contentId;
+    if (!lookupId || !mongoose.Types.ObjectId.isValid(lookupId)) {
       return reply.status(400).send({ success: false, message: 'Valid contentId is required.' });
     }
 
     const filter: any = {
       userId: new mongoose.Types.ObjectId(userId),
-      contentId: new mongoose.Types.ObjectId(contentId),
+      contentId: new mongoose.Types.ObjectId(lookupId),
       profileId: profileId || null,
     };
 
@@ -162,7 +175,7 @@ export const getWatchHistory = async (request: FastifyRequest, reply: FastifyRep
       .sort({ lastWatchedAt: -1 })
       .skip(skip)
       .limit(Number(limit))
-      .populate('contentId', 'title thumbnail posterImage type badge duration planRequired status hlsUrl videoUrl')
+      .populate('contentId', 'title thumbnail posterImage type badge duration planRequired status hlsUrl videoUrl tvShowId season episode')
       .lean();
 
     const total = await UserWatchProgressModel.countDocuments(query);
@@ -175,25 +188,32 @@ export const getWatchHistory = async (request: FastifyRequest, reply: FastifyRep
       if (!h.contentId) return null;
 
       // Determine planRequired
+      const isEpisode = h.contentModelType === 'Episode';
+      const isShow = h.contentModelType === 'TVShow' || isEpisode;
       const planRequired: 'free' | 'premium' | 'basic' | 'standard' = h.contentId.planRequired || 'free';
       const locked = isContentLocked(planRequired, userPlan);
       const accessible = canAccessContent(planRequired, userPlan);
 
       // Determine isAvailable & status
-      const status = h.contentId.status || 'draft';
-      const isAvailable = status === 'published';
+      const status = h.contentId.status || (isEpisode ? 'published' : 'draft');
+      const isAvailable = status === 'published' || isEpisode;
 
       // Stream URL only when unlocked for this user
       const hlsUrl = accessible
-        ? (h.contentId.hlsUrl || h.contentId.videoUrl || '')
+        ? (h.contentId.hlsUrl || h.contentId.videoUrl || h.contentId.sourceVideoUrl || '')
         : '';
 
       return {
         id: h._id.toString(),
-        contentId: h.contentId?._id?.toString(),
-        contentType: 'movie',
-        type: 'movie',
-        title: h.contentId.title,
+        contentId: isEpisode ? (h.contentId.tvShowId?.toString() || h.contentId?._id?.toString()) : h.contentId?._id?.toString(),
+        episodeId: isEpisode ? h.contentId?._id?.toString() : undefined,
+        contentType: isShow ? 'show' : 'movie',
+        type: isShow ? 'show' : 'movie',
+        title: isEpisode && h.contentId.episode
+          ? `${h.contentId.title} · S${h.contentId.season || 1}E${h.contentId.episode}`
+          : h.contentId.title,
+        season: isEpisode ? h.contentId.season : undefined,
+        episode: isEpisode ? h.contentId.episode : undefined,
         thumbnail: h.contentId.thumbnail || h.contentId.posterImage,
         progressPercent: h.progressPercent,
         progressSeconds: h.progressSeconds,

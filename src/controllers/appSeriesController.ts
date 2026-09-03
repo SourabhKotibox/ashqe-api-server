@@ -86,8 +86,8 @@ export const getSeriesDetail = async (request: FastifyRequest, reply: FastifyRep
     if (userId) {
       const userObjectId = new mongoose.Types.ObjectId(userId);
       const [likeDoc, wishlistDoc] = await Promise.all([
-        UserLikeModel.findOne({ userId: userObjectId, tvShowId: series._id, episodeId: null }).lean(),
-        UserWishlistModel.findOne({ userId: userObjectId, tvShowId: series._id }).lean(),
+        UserLikeModel.findOne({ userId: userObjectId, contentId: series._id }).lean(),
+        UserWishlistModel.findOne({ userId: userObjectId, contentId: series._id }).lean(),
       ]);
       isLikedByUser = !!likeDoc;
       isWishlisted = !!wishlistDoc;
@@ -152,7 +152,6 @@ export const getSeriesDetail = async (request: FastifyRequest, reply: FastifyRep
     // Fetch Episodes
     const allEpisodes = await EpisodeModel.find({
       tvShowId: series._id,
-      processingStatus: 'ready'
     }).sort({ season: 1, episode: 1 }).lean();
 
     const seasonsMap = new Map<number, any[]>();
@@ -175,7 +174,8 @@ export const getSeriesDetail = async (request: FastifyRequest, reply: FastifyRep
         duration: ep.duration || null,
         durationFormatted: durationStr,
         isFree: ep.isFree,
-        videoUrl: toAbsoluteUrl(request, ep.hlsUrl, s3Active, s3BaseUrl) || null,
+        videoUrl: toAbsoluteUrl(request, ep.hlsUrl || ep.sourceVideoUrl, s3Active, s3BaseUrl) || null,
+        hlsUrl: toAbsoluteUrl(request, ep.hlsUrl || ep.sourceVideoUrl, s3Active, s3BaseUrl) || null,
       });
     }
 
@@ -231,6 +231,7 @@ export const getSeriesDetail = async (request: FastifyRequest, reply: FastifyRep
         crew,
         related,
         seasons,
+        episodes: Array.from(seasonsMap.values()).flat(),
       },
     });
   } catch (error: any) {

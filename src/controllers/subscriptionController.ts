@@ -530,6 +530,12 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
     };
 
     const payload = await buildSubscriptionPayload(body);
+
+    await SubscriptionModel.updateMany(
+      { userId: sanitizedUserId, status: 'active' },
+      { $set: { status: 'inactive' } }
+    );
+
     const subscription = await SubscriptionModel.create(payload);
 
     await syncUserSubscription(sanitizedUserId, {
@@ -541,9 +547,11 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
 
     return reply.send({
       success: true,
+      subscription: true,
       message: 'Payment verified and subscription activated successfully',
       subscriptionId: subscription._id,
-      subscriptionPlan: payload.plan || normalizePlanKey(payload.plan), // Return actual plan name
+      subscriptionPlan: payload.plan || normalizePlanKey(payload.plan),
+      subscriptionPlanName: payload.plan || null,
       subscriptionStatus: 'active',
       subscriptionExpiry: payload.endDate,
     });

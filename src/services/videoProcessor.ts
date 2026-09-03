@@ -421,14 +421,56 @@ export const processEpisodeInBackground = (episodeId: Types.ObjectId | string, s
   });
 };
 
+export const processTVShowHls = async (tvShowId: Types.ObjectId | string, sourceVideoUrl: string) => {
+  try {
+    const { TVShowModel } = await import('../models/TVShow');
+    await TVShowModel.findByIdAndUpdate(tvShowId, { processingStatus: 'processing' });
+
+    const result = await transcodeHlsMultiResolution({
+      id: tvShowId.toString(),
+      sourceVideoUrl,
+      folderType: 'movies',
+    });
+
+    await TVShowModel.findByIdAndUpdate(tvShowId, {
+      hlsUrl: result.hlsUrl,
+      videoUrl: sourceVideoUrl,
+      sourceVideoUrl,
+      videoQualities: result.videoQualities,
+      processingStatus: 'ready',
+      processingError: null,
+    });
+
+    logger.info({ tvShowId, hlsUrl: result.hlsUrl }, 'TV show HLS processing complete');
+  } catch (error: any) {
+    logger.error({ error, tvShowId }, 'Error processing TV show HLS');
+    const { TVShowModel } = await import('../models/TVShow');
+    await TVShowModel.findByIdAndUpdate(tvShowId, {
+      processingStatus: 'failed',
+      processingError: error.message,
+    });
+  }
+};
+
+export const processTVShowInBackground = (tvShowId: Types.ObjectId | string, sourceVideoUrl: string) => {
+  setImmediate(async () => {
+    await processTVShowHls(tvShowId, sourceVideoUrl);
+  });
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Auto-detect HLS qualities already on disk and sync them to MongoDB
 // ─────────────────────────────────────────────────────────────────────────────
 export const autoDetectAndSyncQualities = async (
   id: Types.ObjectId | string,
-  type: 'movie' | 'episode' = 'movie'
+  type: 'movie' | 'episode' | 'tvShow' = 'movie'
 ): Promise<any> => {
-  const Model = type === 'episode' ? (await import('../models/Episode')).EpisodeModel : MovieModel;
+  const Model =
+    type === 'episode'
+      ? (await import('../models/Episode')).EpisodeModel
+      : type === 'tvShow'
+        ? (await import('../models/TVShow')).TVShowModel
+        : MovieModel;
   const folderType = type === 'episode' ? 'episodes' : 'movies';
 
   const doc = await (Model as any).findById(id).lean();

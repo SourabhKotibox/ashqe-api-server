@@ -3,7 +3,7 @@ import mongoose, { Schema, Document, Types } from 'mongoose';
 export interface IUserLike extends Document {
   userId: Types.ObjectId;
   contentId: Types.ObjectId;
-  contentModelType: 'Movie'; // which collection contentId refers to
+  contentModelType: 'Movie' | 'TVShow' | 'Episode';
   createdAt: Date;
 }
 
@@ -11,7 +11,7 @@ const UserLikeSchema = new Schema<IUserLike>(
   {
     userId: { type: Schema.Types.ObjectId, ref: 'User', required: true, index: true },
     contentId: { type: Schema.Types.ObjectId, required: true, index: true },
-    contentModelType: { type: String, enum: ['Movie'], required: true },
+    contentModelType: { type: String, enum: ['Movie', 'TVShow', 'Episode'], required: true },
   },
   { timestamps: true }
 );

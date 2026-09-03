@@ -5,7 +5,7 @@ import { GenreModel } from '../models/Genre';
 import { logger } from '../lib/logger';
 
 // Standardized mapping for website ContentItem
-const mapContentItem = (item: any) => {
+const mapContentItem = (item: any, kind: 'movie' | 'show' = 'movie') => {
   let badge;
   if (item.featured && item.trending) badge = 'EXCLUSIVE';
   else if (item.trending) badge = 'TRENDING';
@@ -13,13 +13,16 @@ const mapContentItem = (item: any) => {
   else if (item.isNewContent) badge = 'NEW';
   else if (item.views > 1000) badge = 'HOT';
 
+  const isShow = kind === 'show';
+  const id = item._id.toString();
   return {
-    id: item._id.toString(),
+    id,
+    _id: id,
     title: item.title,
     poster: item.posterImage || item.thumbnail || '',
     backdrop: item.bannerImage || item.thumbnail || '',
-    type: 'movie',
-    contentType: 'movie',
+    type: isShow ? 'show' : 'movie',
+    contentType: isShow ? 'tvShow' : 'movie',
     year: item.year?.toString() || new Date(item.createdAt).getFullYear().toString(),
     duration: item.duration ? `${item.duration}m` : '120m',
     imdbRating: item.imdbRating?.toString() || (item.rating || '8.0'),
@@ -28,6 +31,12 @@ const mapContentItem = (item: any) => {
     language: item.languages && item.languages.length > 0 ? 'Multi' : 'EN',
     badge,
     genres: (item.genres || []).map((g: any) => g?.name || g),
+    seasons: item.totalSeasons || undefined,
+    trending: !!item.trending,
+    isNewContent: !!item.isNewContent,
+    featured: !!item.featured,
+    views: item.views || 0,
+    createdAt: item.createdAt ? new Date(item.createdAt).toISOString() : undefined,
   };
 };
 
@@ -90,15 +99,44 @@ export const getWebBrowse = async (request: FastifyRequest, reply: FastifyReply)
       sort = { imdbRating: -1, views: -1 };
     }
 
-    const selectFields = 'title description shortDescription thumbnail bannerImage posterImage year rating ageRating duration imdbRating featured trending isNewContent views genres languages createdAt';
+    const selectFields = 'title description shortDescription thumbnail bannerImage posterImage year rating ageRating duration imdbRating featured trending isNewContent views genres languages createdAt totalSeasons';
 
-    const Model: any = query.type === 'show' || query.type === 'tvshows' ? TVShowModel : MovieModel;
-    const [rawItems, total] = await Promise.all([
-      Model.find(filter).sort(sort).skip(skip).limit(limit).select(selectFields).populate('genres', 'name').lean(),
-      Model.countDocuments(filter)
-    ]);
+    const isShowQuery = query.type === 'show' || query.type === 'tvshows' || query.type === 'series';
+    const isMovieQuery = query.type === 'movie' || query.type === 'movies';
+    const fetchBoth = !isShowQuery && !isMovieQuery;
 
-    const items = rawItems.map((item: any) => mapContentItem(item));
+    let items: any[] = [];
+    let total = 0;
+
+    if (fetchBoth) {
+      const [movies, shows, movieCount, showCount] = await Promise.all([
+        MovieModel.find(filter).sort(sort).skip(skip).limit(limit).select(selectFields).populate('genres', 'name').lean(),
+        TVShowModel.find(filter).sort(sort).skip(skip).limit(limit).select(selectFields).populate('genres', 'name').lean(),
+        MovieModel.countDocuments(filter),
+        TVShowModel.countDocuments(filter),
+      ]);
+      total = movieCount + showCount;
+      const sortKey = Object.keys(sort)[0] || 'createdAt';
+      const sortDir = (sort as any)[sortKey] === 1 ? 1 : -1;
+      items = [
+        ...movies.map((item: any) => mapContentItem(item, 'movie')),
+        ...shows.map((item: any) => mapContentItem(item, 'show')),
+      ].sort((a: any, b: any) => {
+        const av = a[sortKey] ?? a.views ?? 0;
+        const bv = b[sortKey] ?? b.views ?? 0;
+        if (av < bv) return -1 * sortDir;
+        if (av > bv) return 1 * sortDir;
+        return 0;
+      }).slice(0, limit);
+    } else {
+      const Model: any = isShowQuery ? TVShowModel : MovieModel;
+      const [rawItems, count] = await Promise.all([
+        Model.find(filter).sort(sort).skip(skip).limit(limit).select(selectFields).populate('genres', 'name').lean(),
+        Model.countDocuments(filter)
+      ]);
+      total = count;
+      items = rawItems.map((item: any) => mapContentItem(item, isShowQuery ? 'show' : 'movie'));
+    }
 
     const responseData = {
       success: true,

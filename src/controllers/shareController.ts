@@ -1,19 +1,25 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { MovieModel } from '../models/Movie';
 import { logger } from '../lib/logger';
+import { resolveContent } from '../lib/contentResolver';
 
-// Get these from env variables in production
 const APP_PACKAGE_NAME = process.env.APP_PACKAGE_NAME || 'com.ashqe.tophills';
 const APP_SCHEME = process.env.APP_SCHEME || 'ashqe';
 const APP_STORE_ID = process.env.APP_STORE_ID || '123456789';
 const FRONTEND_URL = process.env.FRONTEND_URL || 'https://ashqe.app';
 
-// Helper to increment share count dynamically
-const incrementShareCount = async (contentId: string, _contentType?: string) => {
+const incrementShareCount = async (contentId: string, contentType?: string) => {
   try {
-    await MovieModel.findByIdAndUpdate(contentId, { $inc: { shares: 1 } });
+    const resolved = await resolveContent(contentId, contentType);
+    if (!resolved) return 0;
+    const updated = await (resolved.model as any).findByIdAndUpdate(
+      contentId,
+      { $inc: { shares: 1 } },
+      { new: true }
+    ).select('shares').lean();
+    return updated?.shares ?? 0;
   } catch (err) {
     logger.error({ err, contentId }, 'Failed to increment share count');
+    return 0;
   }
 };
 
@@ -21,15 +27,11 @@ export const handleShareRedirect = async (request: FastifyRequest, reply: Fastif
   const { contentId } = request.params as { contentId: string };
   const query = request.query as { contentType?: string };
 
-  // Increment share count dynamically when the link is clicked/visited
   await incrementShareCount(contentId, query.contentType);
 
-  // Android Intent URI (Automatically opens app OR Play Store if not installed)
-  // S.browser_fallback_url forces Play Store if intent fails
   const playStoreUrl = `https://play.google.com/store/apps/details?id=${APP_PACKAGE_NAME}&referrer=movie_id%3D${contentId}`;
   const androidIntent = `intent://watch/${contentId}#Intent;scheme=${APP_SCHEME};package=${APP_PACKAGE_NAME};S.browser_fallback_url=${encodeURIComponent(playStoreUrl)};end`;
   
-  // iOS Custom Scheme
   const iosScheme = `${APP_SCHEME}://watch/${contentId}`;
   const appStoreLink = `https://apps.apple.com/app/id${APP_STORE_ID}`;
 
@@ -50,18 +52,15 @@ export const handleShareRedirect = async (request: FastifyRequest, reply: Fastif
           var userAgent = navigator.userAgent || navigator.vendor || window.opera;
           
           if (/android/i.test(userAgent)) {
-            // Android: Intent URI handles both opening the app and Play Store fallback automatically natively!
             window.location.replace("${androidIntent}");
           } 
           else if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
-            // iOS: Try custom scheme, fallback to App Store after a short delay
             window.location.replace("${iosScheme}");
             setTimeout(function() {
               window.location.replace("${appStoreLink}");
             }, 2500);
           } 
           else {
-            // Desktop or other: redirect to website
             window.location.replace("${FRONTEND_URL}/watch/${contentId}");
           }
         });
@@ -79,14 +78,8 @@ export const handleShareRedirect = async (request: FastifyRequest, reply: Fastif
 export const recordShare = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const { contentId } = request.params as { contentId: string };
-    const body = request.body as { contentType?: 'movie' } || {};
-    const contentType = body.contentType;
-
-    await incrementShareCount(contentId, contentType);
-
-    // Fetch the updated count to return in response
-    const movie = await MovieModel.findById(contentId).select('shares').lean();
-    const sharesCount = movie?.shares ?? 0;
+    const body = (request.body as { contentType?: string }) || {};
+    const sharesCount = await incrementShareCount(contentId, body.contentType);
 
     return reply.send({
       success: true,
