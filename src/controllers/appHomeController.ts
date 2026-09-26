@@ -232,11 +232,8 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
       const buildFilter = (base: any) => {
         const sectionFilter = { ...(section.filter || {}) };
 
-        // Legacy mediaType filter — movies only now
-        if (sectionFilter.mediaType) {
-          if (sectionFilter.mediaType === 'series') return null;
-          delete sectionFilter.mediaType;
-        }
+        // Remove mediaType from filter so it doesn't try to query MongoDB for mediaType field
+        delete sectionFilter.mediaType;
 
         const manualBase = { status: 'published' };
         if ((section as any).contentSelection === 'manual') {
@@ -258,16 +255,45 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
         baseMovieFilter.languages = targetLanguageId;
       }
 
-      const filterMovie = buildFilter(baseMovieFilter);
+      let contentMovies: any[] = [];
+      let contentShows: any[] = [];
 
-      if (filterMovie) {
-        content = await MovieModel.find(filterMovie)
+      // Determine if we should fetch movies, shows, or both
+      const mediaTypeFilter = section.filter?.mediaType;
+      
+      const filterMovie = buildFilter(baseMovieFilter);
+      if (filterMovie && (!mediaTypeFilter || mediaTypeFilter === 'movie' || mediaTypeFilter === 'mixed')) {
+        contentMovies = await MovieModel.find(filterMovie)
           .sort(section.sortBy)
           .limit(section.limit)
           .populate('languages', 'name')
           .populate('genres', 'name')
           .lean();
       }
+      
+      if (filterMovie && (!mediaTypeFilter || mediaTypeFilter === 'series' || mediaTypeFilter === 'tvshow' || mediaTypeFilter === 'mixed')) {
+        contentShows = await TVShowModel.find(filterMovie)
+          .sort(section.sortBy)
+          .limit(section.limit)
+          .populate('languages', 'name')
+          .populate('genres', 'name')
+          .lean();
+      }
+
+      // Merge and sort again if necessary, then limit
+      content = [...contentMovies, ...contentShows];
+      if (section.sortBy) {
+        const sortKey = Object.keys(section.sortBy)[0];
+        if (sortKey) {
+          const dir = section.sortBy[sortKey];
+          content.sort((a, b) => {
+            if (a[sortKey] < b[sortKey]) return dir === 1 ? -1 : 1;
+            if (a[sortKey] > b[sortKey]) return dir === 1 ? 1 : -1;
+            return 0;
+          });
+        }
+      }
+      content = content.slice(0, section.limit);
 
       if (content.length === 0) {
         return null;

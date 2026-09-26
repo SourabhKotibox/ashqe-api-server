@@ -2,12 +2,17 @@ import type { FastifyRequest, FastifyReply } from 'fastify';
 import { Types } from 'mongoose';
 import { SectionModel } from '../models/Section';
 import { MovieModel } from '../models/Movie';
+import { TVShowModel } from '../models/TVShow';
 
 const syncManualContent = async (section: any) => {
   const sectionIdStr = section._id.toString();
 
-  // Remove this section from all movies
+  // Remove this section from all movies and TV shows
   await MovieModel.updateMany(
+    { sections: sectionIdStr },
+    { $pull: { sections: sectionIdStr } }
+  );
+  await TVShowModel.updateMany(
     { sections: sectionIdStr },
     { $pull: { sections: sectionIdStr } }
   );
@@ -15,6 +20,10 @@ const syncManualContent = async (section: any) => {
   // Add this section to the new manual content IDs
   if (section.manualContentIds && section.manualContentIds.length > 0) {
     await MovieModel.updateMany(
+      { _id: { $in: section.manualContentIds } },
+      { $addToSet: { sections: sectionIdStr } }
+    );
+    await TVShowModel.updateMany(
       { _id: { $in: section.manualContentIds } },
       { $addToSet: { sections: sectionIdStr } }
     );
@@ -111,6 +120,10 @@ export const deleteSection = async (request: FastifyRequest, reply: FastifyReply
       return;
     }
     await MovieModel.updateMany(
+      { sections: section._id.toString() },
+      { $pull: { sections: section._id.toString() } }
+    );
+    await TVShowModel.updateMany(
       { sections: section._id.toString() },
       { $pull: { sections: section._id.toString() } }
     );

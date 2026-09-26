@@ -187,9 +187,13 @@ export const editAppSetting = async (request: FastifyRequest, reply: FastifyRepl
 export const getHomeTabs = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const appSetting = await AppSettingModel.findOne({ key: 'home-tabs-config' });
-    const tabs = appSetting?.value || [
+    let tabs = appSetting?.value || [
       { id: 'movie', name: 'Movies' },
+      { id: 'webseries', name: 'Web Series' }
     ];
+    if (!tabs.find((t: any) => t.id === 'webseries')) {
+      tabs.push({ id: 'webseries', name: 'Web Series' });
+    }
     return reply.send({ success: true, data: tabs });
   } catch (error: any) {
     return reply.status(500).send({ success: false, error: error.message });
