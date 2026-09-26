@@ -1,13 +1,13 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import { ContentModel } from './src/models/Content.js';
+import { MovieModel } from './src/models/Movie.js';
 import { EpisodeModel } from './src/models/Episode.js';
 dotenv.config();
 
 const check = async () => {
   try {
     await mongoose.connect(process.env.MONGODB_URI || '');
-    const content = await ContentModel.findOne({ title: 'Beach Romance' }).lean();
+    const content = await MovieModel.findOne({ title: 'Beach Romance' }).lean();
     if (!content) {
       console.log('Content not found');
       return;

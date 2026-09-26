@@ -1,0 +1,3396 @@
+{
+  "info": {
+    "_postman_id": "ashqe-app-api-collection-v3",
+    "name": "Ashqe App — Complete API Collection v3",
+    "description": "Full mobile-app API collection for Ashqe (Flutter / React Native).\n\n**Base URL:** `https://ashqe.app`  (or `http://localhost:3000` for local dev)\n**Auth:** After OTP/login, the test script auto-saves `accessToken` and `userId` to collection variables.\n\nAll protected routes require:\n  `Authorization: Bearer {{accessToken}}`\n\nOptional per-profile header:\n  `x-profile-id: <profileId>`\n\nFolders:\n 01 — Auth\n 02 — Home & Discovery\n 03 — Movie Detail\n 04 — Series (Web Series) Detail\n 05 — Watch / Video Player\n 06 — Watch Progress & History\n 07 — Like / Unlike\n 08 — Wishlist (Watchlist)\n 09 — Reviews\n 10 — Downloads\n 11 — Share\n 12 — Views (Track View Count)\n 13 — Subscription & Plans\n 14 — User Profile\n 15 — Notifications\n 16 — App Settings & Config",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "https://ashqe.app",
+      "type": "string"
+    },
+    {
+      "key": "accessToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "contentId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "episodeId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "planId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "profileId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "downloadId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "reviewId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "historyId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "01 — Auth",
+      "description": "OTP, email/password, Google, Apple login — no auth required",
+      "item": [
+        {
+          "name": "Send OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/auth/send-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "auth",
+                "send-otp"
+              ]
+            },
+            "description": "Send 4-digit OTP to mobile number.\nReturns `verificationId` — pass it to Verify OTP.\n\n**Body:**\n- `mobileNumber` — 10-digit Indian mobile number (leading country code stripped automatically)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobileNumber\": \"9876543210\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 — OTP Sent",
+              "status": "OK",
+              "code": 200,
+              "originalRequest": {
+                "method": "POST"
+              },
+              "body": "{\n  \"success\": true,\n  \"verificationId\": \"abc-123-verif\",\n  \"message\": \"OTP sent successfully\",\n  \"mobileNumber\": \"9876543210\"\n}"
+            }
+          ]
+        },
+        {
+          "name": "Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const r = pm.response.json();",
+                  "if (r.accessToken) {",
+                  "  pm.collectionVariables.set('accessToken', r.accessToken);",
+                  "  pm.collectionVariables.set('userId', r.userId);",
+                  "  console.log('✅ Token saved. Plan:', r.subscriptionPlan);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/auth/verify-otp",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "auth",
+                "verify-otp"
+              ]
+            },
+            "description": "Verify OTP and receive JWT.\n\n**Test script auto-saves** `accessToken` and `userId` to collection variables.\n\n**Body fields:**\n- `mobileNumber` — 10-digit number\n- `verificationId` — from Send OTP response\n- `otp` — 4–8 digit code\n- `name` — display name (used only on first registration)\n- `deviceId` — unique device identifier for device-limit tracking\n- `deviceName` — human-readable device name\n\n**Response includes:**\n- `accessToken`, `userId`, `name`, `email`, `phone`, `avatar`\n- `subscriptionPlan`, `subscriptionStatus`, `subscriptionExpiry`\n- `isNewUser` — true if this was first registration\n- `expiresIn` — 604800 (7 days)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"mobileNumber\": \"9876543210\",\n  \"verificationId\": \"<verificationId from Send OTP>\",\n  \"otp\": \"1234\",\n  \"name\": \"Test User\",\n  \"deviceId\": \"device-abc-001\",\n  \"deviceName\": \"My Android\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [
+            {
+              "name": "200 — OTP Verified",
+              "status": "OK",
+              "code": 200,
+              "originalRequest": {
+                "method": "POST"
+              },
+              "body": "{\n  \"success\": true,\n  \"accessToken\": \"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...\",\n  \"userId\": \"64f1a2b3c4d5e6f7a8b9c0d1\",\n  \"name\": \"Test User\",\n  \"email\": null,\n  \"phone\": \"9876543210\",\n  \"avatar\": null,\n  \"subscriptionPlan\": \"free\",\n  \"subscriptionPlanName\": null,\n  \"subscriptionStatus\": \"inactive\",\n  \"subscriptionExpiry\": null,\n  \"subscription\": false,\n  \"walletBalance\": 0,\n  \"profileLimitCount\": 1,\n  \"isNewUser\": false,\n  \"expiresIn\": 604800\n}"
+            }
+          ]
+        },
+        {
+          "name": "Register (Email + Password)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const r = pm.response.json();",
+                  "if (r.accessToken) {",
+                  "  pm.collectionVariables.set('accessToken', r.accessToken);",
+                  "  pm.collectionVariables.set('userId', r.userId);",
+                  "  console.log('✅ Registered. Token saved.');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/auth/register",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "auth",
+                "register"
+              ]
+            },
+            "description": "Register a new user with email + password.\n\nIf `phone` is provided and an existing OTP-only account is found for that phone, the accounts are linked automatically.\n\n**Body:**\n- `name` (required)\n- `email` (required — must be unique)\n- `password` (required — min 6 chars)\n- `phone` (optional — 10-digit)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Test User\",\n  \"email\": \"test@example.com\",\n  \"password\": \"SecurePass123\",\n  \"phone\": \"9876543210\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Login (Email or Phone + Password)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const r = pm.response.json();",
+                  "if (r.accessToken) {",
+                  "  pm.collectionVariables.set('accessToken', r.accessToken);",
+                  "  pm.collectionVariables.set('userId', r.userId);",
+                  "  console.log('✅ Logged in. Plan:', r.subscriptionPlan);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "auth",
+                "login"
+              ]
+            },
+            "description": "Login with email or phone number + password.\n\nThe `email` field accepts either an email address OR a phone number (no `@` → treated as phone).\n\n**Returns:** accessToken, userId, name, email, phone, avatar, subscriptionPlan, subscriptionStatus, walletBalance",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"SecurePass123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Google Sign-In",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const r = pm.response.json();",
+                  "if (r.accessToken) {",
+                  "  pm.collectionVariables.set('accessToken', r.accessToken);",
+                  "  pm.collectionVariables.set('userId', r.userId);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/auth/google",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "auth",
+                "google"
+              ]
+            },
+            "description": "Google OAuth Sign-In.\nPass the Google ID token from `google_sign_in` Flutter package.\nRequires Google Sign-In to be enabled in admin settings.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idToken\": \"<Google ID Token from google_sign_in package>\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Apple Sign-In",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const r = pm.response.json();",
+                  "if (r.accessToken) {",
+                  "  pm.collectionVariables.set('accessToken', r.accessToken);",
+                  "  pm.collectionVariables.set('userId', r.userId);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/auth/apple",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "auth",
+                "apple"
+              ]
+            },
+            "description": "Apple Sign-In.\nPass Apple `identityToken`. The `user` object (name + email) is only sent by Apple on the FIRST sign-in — cache it in the app.\nRequires Apple Sign-In to be enabled in admin settings.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"idToken\": \"<Apple identityToken from sign_in_with_apple package>\",\n  \"user\": {\n    \"name\": { \"firstName\": \"John\", \"lastName\": \"Doe\" },\n    \"email\": \"john@privaterelay.appleid.com\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Logout. Clears the device list for the user.\nAlways returns 200 — even if token is expired.\nInvalidate the token on the client side after calling this."
+          }
+        },
+        {
+          "name": "Set Preferred Language (Post Onboarding)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/auth/language/{{userId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "auth",
+                "language",
+                "{{userId}}"
+              ]
+            },
+            "description": "Set preferred content language after OTP verification (post-onboarding language picker screen).\nAlso accepts `languageId` (ObjectId) or language `code`.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language\": \"Hindi\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Skip Language Selection",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/auth/language/{{userId}}/skip",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "auth",
+                "language",
+                "{{userId}}",
+                "skip"
+              ]
+            },
+            "description": "Skip language selection step. Sets preferredLanguage = Hindi and languageSelectionSkipped = true."
+          }
+        },
+        {
+          "name": "OTP Gateway Status [Debug]",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/app/auth/otp-status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "auth",
+                "otp-status"
+              ]
+            },
+            "description": "Debug endpoint — check if Message Central OTP gateway is configured on the server."
+          }
+        }
+      ]
+    },
+    {
+      "name": "02 — Home & Discovery",
+      "description": "Home sections, banners, explore browser, search — no auth required",
+      "item": [
+        {
+          "name": "Get Home Page",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "Optional — personalises like/wishlist flags"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/home",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "home"
+              ]
+            },
+            "description": "Returns home page sections (trending, new releases, exclusive, etc.).\nOptional auth — pass token to unlock `isLikedByUser` / `isWishlisted` per item."
+          }
+        },
+        {
+          "name": "Get App Banners",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/app/banners",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "banners"
+              ]
+            },
+            "description": "Returns hero banners configured in the admin panel for the home screen carousel."
+          }
+        },
+        {
+          "name": "Explore — Browse All Content",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/explore?page=1&limit=20&contentType=tvshow",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "explore"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1",
+                  "description": "Page number (default: 1)"
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Items per page (default: 20)"
+                },
+                {
+                  "key": "contentType",
+                  "value": "tvshow",
+                  "description": "movie | tvshow | drama (optional)"
+                },
+                {
+                  "key": "genre",
+                  "value": "",
+                  "description": "Genre ObjectId (optional)",
+                  "disabled": true
+                },
+                {
+                  "key": "language",
+                  "value": "",
+                  "description": "Language ObjectId (optional)",
+                  "disabled": true
+                },
+                {
+                  "key": "sort",
+                  "value": "",
+                  "description": "trending | new | rating (optional)",
+                  "disabled": true
+                },
+                {
+                  "key": "year",
+                  "value": "",
+                  "description": "Filter by release year (optional)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Paginated infinite-scroll content browser with optional genre, language, sort, and year filters."
+          }
+        },
+        {
+          "name": "Search",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/search?q=love",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "love",
+                  "description": "Search keyword"
+                },
+                {
+                  "key": "page",
+                  "value": "1",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "disabled": true
+                },
+                {
+                  "key": "contentType",
+                  "value": "tvshow",
+                  "description": "Optional filter",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Returns:\n- `trending` — array of trending search keywords\n- `results` — paginated content matching the query\n- `total`, `page`"
+          }
+        }
+      ]
+    },
+    {
+      "name": "03 — Movie Detail",
+      "description": "GET full movie detail page data — auth optional",
+      "item": [
+        {
+          "name": "Get Movie Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "Optional — unlocks hlsUrl, like/wishlist/progress flags"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/movies/{{contentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "movies",
+                "{{contentId}}"
+              ]
+            },
+            "description": "Returns full movie detail for the movie detail screen:\n\n**Media:**\n- `thumbnail`, `bannerImage`, `posterImage`, `trailerUrl`\n- `hlsUrl` — only returned when user can access the content\n- `videoSettings[]` — quality list: { key, label, description, url, requiresPlan, isLocked }\n  - auto=free, 720p=basic, 1080p=standard, 4K=premium\n- `playbackSpeeds[]` — [0.75x, Normal, 1.25x, 1.5x, 1.75x, 2.0x]\n\n**Meta:**\n- `title`, `originalTitle`, `description`, `shortDescription`\n- `genres[]`, `genresText`, `languages[]`\n- `year`, `rating`, `ageRating`, `imdbRating`\n- `duration`, `durationFormatted`\n- `planRequired`, `isLocked`, `requiresSubscription`\n- `isExclusive`, `featured`, `trending`, `releaseDate`, `country`, `studio`\n\n**Stats:** `views`, `likeCount`, `shares`\n\n**User flags (auth required):**\n- `isLikedByUser`, `isWishlisted`, `watchProgress`, `isDownloaded`\n\n**People:** `cast[]`, `crew[]`\n**Related:** `related[]`\n**Share:** `shareUrl`"
+          }
+        }
+      ]
+    },
+    {
+      "name": "04 — Series (Web Series) Detail",
+      "description": "GET full series detail page data — auth optional",
+      "item": [
+        {
+          "name": "Get Series Detail",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "Optional — unlocks like/wishlist, premium episode HLS URLs"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/series/{{contentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "series",
+                "{{contentId}}"
+              ]
+            },
+            "description": "Full series detail for the series detail screen. See folder 05 Web Series for full response shape documentation.\n\nReturns: id, title, thumbnail, bannerImage, posterImage, trailerUrl, contentType, isLocked, genres, languages, year, rating, ageRating, imdbRating, planRequired, episodeCount, isExclusive, featured, trending, views, likeCount, shares, isLikedByUser (auth), isWishlisted (auth), cast[], crew[], seasons[]{seasonNumber, episodes[]}, episodes[] (flat), related[], shareUrl"
+          }
+        }
+      ]
+    },
+    {
+      "name": "05 — 🎬 Web Series & TV Shows — Complete API",
+      "description": "ALL APIs for Web Series / TV Shows in 5 sub-folders.\n\n1. App — Series Discovery & Detail  (public / optional auth)\n2. App — Watch / Video Player       (public / optional auth)\n3. App — User Interactions          (auth required)\n4. Admin — TV Shows CRUD            (admin JWT + RBAC)\n5. Admin — Episodes CRUD            (admin JWT + RBAC)",
+      "item": [
+        {
+          "name": "1. App — Series Discovery & Detail",
+          "description": "Public / optional-auth endpoints for the app user.",
+          "item": [
+            {
+              "name": "Get Series Detail (Full)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}",
+                    "description": "Optional — unlocks isLikedByUser, isWishlisted, premium episode HLS URLs"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/app/series/{{contentId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "app",
+                    "series",
+                    "{{contentId}}"
+                  ]
+                },
+                "description": "Full series detail for the detail screen.\n\nResponse fields:\n- id, title, originalTitle, description, shortDescription\n- thumbnail, bannerImage, posterImage, trailerUrl\n- contentType (tvshow|drama), isLocked, requiresSubscription\n- genres[], genresText, languages[]\n- year, rating, ageRating, imdbRating\n- planRequired (free|basic|standard|premium)\n- episodeCount, isExclusive, featured, trending\n- releaseDate, country, studio\n- views, likeCount, shares\n- isLikedByUser, isWishlisted (auth only)\n- shareUrl\n- cast[]: { id, name, image, role, character }\n- crew[]: { id, name, image, role }\n- seasons[]: { seasonNumber, episodes[] }\n- episodes[]: flat list of all episodes with hlsUrl\n- related[]: { id, title, thumbnail, contentType }"
+              }
+            },
+            {
+              "name": "Browse / Explore Web Series",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{baseUrl}}/api/explore?contentType=tvshow&page=1&limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "explore"
+                  ],
+                  "query": [
+                    {
+                      "key": "contentType",
+                      "value": "tvshow",
+                      "description": "tvshow | drama | movie"
+                    },
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    },
+                    {
+                      "key": "genre",
+                      "value": "",
+                      "description": "Genre ObjectId (optional)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "language",
+                      "value": "",
+                      "description": "Language ObjectId (optional)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "sort",
+                      "value": "",
+                      "description": "trending | new | rating (optional)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "year",
+                      "value": "",
+                      "description": "Filter by year e.g. 2024 (optional)",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Paginated infinite-scroll list of web series with optional filters for genre, language, sort order, and year."
+              }
+            },
+            {
+              "name": "Search Web Series",
+              "request": {
+                "method": "GET",
+                "url": {
+                  "raw": "{{baseUrl}}/api/search?q=love&contentType=tvshow",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "search"
+                  ],
+                  "query": [
+                    {
+                      "key": "q",
+                      "value": "love",
+                      "description": "Search keyword"
+                    },
+                    {
+                      "key": "contentType",
+                      "value": "tvshow",
+                      "description": "tvshow | drama (optional filter)"
+                    },
+                    {
+                      "key": "page",
+                      "value": "1",
+                      "disabled": true
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Returns trending keywords + paginated series matching the search query."
+              }
+            },
+            {
+              "name": "Home Page (includes series sections)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}",
+                    "description": "Optional — personalises like/wishlist flags"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/home",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "home"
+                  ]
+                },
+                "description": "Returns all home sections — trending, new releases, exclusive, etc. Includes both movies and series cards."
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. App — Watch / Video Player",
+          "description": "Video player page data for episodes — auth optional (pass token to unlock paid content).",
+          "item": [
+            {
+              "name": "Watch Episode — by Season & Episode Number",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}",
+                    "description": "Optional — unlocks premium episodes"
+                  },
+                  {
+                    "key": "x-profile-id",
+                    "value": "{{profileId}}",
+                    "description": "Optional — sub-profile tracking",
+                    "disabled": true
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/watch/{{contentId}}?season=1&episode=1",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "watch",
+                    "{{contentId}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "season",
+                      "value": "1",
+                      "description": "Season number (default: 1)"
+                    },
+                    {
+                      "key": "episode",
+                      "value": "1",
+                      "description": "Episode number (default: 1)"
+                    }
+                  ]
+                },
+                "description": "Pass the TVShow _id as contentId. Returns full player data for a specific season+episode.\n\nResponse: content (meta+cast+episodes), currentEpisode (hlsUrl, videoSettings[], watchProgress, isLocked), playbackSpeeds[], userAccess\n\nQuality Gate:\n- auto / 480p and below: free\n- 720p HD: basic plan\n- 1080p Full HD: standard plan\n- 1440p 2K / 2160p 4K: premium plan\n\ncurrentEpisode.videoSettings example:\n[\n  { key: \"auto\",  label: \"Auto\",          url: \"https://...\", requiresPlan: \"free\",     isLocked: false },\n  { key: \"480p\",  label: \"480p SD\",       url: \"https://...\", requiresPlan: \"free\",     isLocked: false },\n  { key: \"720p\",  label: \"720p HD\",       url: null,         requiresPlan: \"basic\",    isLocked: true  },\n  { key: \"1080p\", label: \"1080p Full HD\", url: null,         requiresPlan: \"standard\", isLocked: true  },\n  { key: \"2160p\", label: \"4K Ultra HD\",   url: null,         requiresPlan: \"premium\",  isLocked: true  }\n]"
+              }
+            },
+            {
+              "name": "Watch Episode — by Episode ID",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}",
+                    "description": "Optional"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/watch/{{contentId}}?episodeId={{episodeId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "watch",
+                    "{{contentId}}"
+                  ],
+                  "query": [
+                    {
+                      "key": "episodeId",
+                      "value": "{{episodeId}}",
+                      "description": "Episode ObjectId — overrides season+episode"
+                    }
+                  ]
+                },
+                "description": "Fetch player data for a specific episode using its direct _id. Useful when navigating from watch history, episode list, or deep link."
+              }
+            },
+            {
+              "name": "Watch — First Episode (auto-load default)",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}",
+                    "description": "Optional"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/watch/{{contentId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "watch",
+                    "{{contentId}}"
+                  ]
+                },
+                "description": "No season/episode params — server auto-loads Season 1, Episode 1 (or first available episode). Use this for \"Play Now\" button on series detail screen."
+              }
+            }
+          ]
+        },
+        {
+          "name": "3. App — User Interactions (auth required 🔐)",
+          "description": "All interactions a logged-in user can do with a web series.",
+          "item": [
+            {
+              "name": "Like / Unlike Series",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/like/{{contentId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "like",
+                    "{{contentId}}"
+                  ]
+                },
+                "description": "Toggle like. Returns isLikedByUser: true when liked, false when unliked. Also returns updated likeCount.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"contentType\": \"tvshow\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Add / Remove from Watchlist",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/app/wishlist/{{contentId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "app",
+                    "wishlist",
+                    "{{contentId}}"
+                  ]
+                },
+                "description": "Toggle watchlist. Returns isWishlisted: true when added, false when removed.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"contentType\": \"tvshow\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Get My Watchlist",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/app/wishlist?page=1&limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "app",
+                    "wishlist"
+                  ],
+                  "query": [
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    },
+                    {
+                      "key": "profileId",
+                      "value": "",
+                      "description": "Sub-profile filter (optional)",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Returns paginated watchlist. Each item: id, contentId, title, poster, type (show|movie), year, duration, imdbRating, ageRating, genres, addedAt."
+              }
+            },
+            {
+              "name": "Save Episode Watch Progress",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  },
+                  {
+                    "key": "x-profile-id",
+                    "value": "{{profileId}}",
+                    "description": "Optional — sub-profile tracking",
+                    "disabled": true
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/app/watch/progress",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "app",
+                    "watch",
+                    "progress"
+                  ]
+                },
+                "description": "Save or upsert watch progress for an episode. Call every 10-30 seconds during playback.\n\ncontentId = TVShow _id\nepisodeId = Episode _id (always pass for series!)\nprogressSeconds = current position in seconds\ndurationSeconds = total episode duration in seconds",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"contentId\": \"{{contentId}}\",\n  \"episodeId\": \"{{episodeId}}\",\n  \"progressSeconds\": 1200,\n  \"durationSeconds\": 2580,\n  \"contentType\": \"tvshow\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Get Episode Watch Progress",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/app/watch/progress?episodeId={{episodeId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "app",
+                    "watch",
+                    "progress"
+                  ],
+                  "query": [
+                    {
+                      "key": "episodeId",
+                      "value": "{{episodeId}}",
+                      "description": "Episode _id — use this for TV episodes"
+                    },
+                    {
+                      "key": "contentId",
+                      "value": "",
+                      "description": "Show _id (fallback)",
+                      "disabled": true
+                    },
+                    {
+                      "key": "profileId",
+                      "value": "",
+                      "description": "Sub-profile (optional)",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Returns progressSeconds, durationSeconds, progressPercent for a specific episode."
+              }
+            },
+            {
+              "name": "Get Watch History",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/app/watch/history?page=1&limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "app",
+                    "watch",
+                    "history"
+                  ],
+                  "query": [
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    }
+                  ]
+                },
+                "description": "Returns watch history sorted by most recently watched. Includes series with season, episode, progressPercent."
+              }
+            },
+            {
+              "name": "Clear Episode Progress",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/app/watch/progress/{{episodeId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "app",
+                    "watch",
+                    "progress",
+                    "{{episodeId}}"
+                  ]
+                },
+                "description": "Remove all watch progress records for a specific episode."
+              }
+            },
+            {
+              "name": "Record Series View",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}",
+                    "description": "Optional"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/views/{{contentId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "views",
+                    "{{contentId}}"
+                  ]
+                },
+                "description": "Increment view count for a web series. Call once when user starts playing.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"contentType\": \"tvshow\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Share Series (record + count)",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}",
+                    "description": "Optional"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/share/{{contentId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "share",
+                    "{{contentId}}"
+                  ]
+                },
+                "description": "Increment share count and get updated sharesCount.\nThe shareable deep-link URL to embed in social media:\nGET {{baseUrl}}/api/share/{{contentId}}",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"contentType\": \"tvshow\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Admin — TV Shows CRUD (admin JWT + RBAC 🔐)",
+          "description": "Admin panel endpoints for managing TV shows / web series. Require admin JWT with tvShows RBAC permission.",
+          "item": [
+            {
+              "name": "List All TV Shows",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/tv-shows?page=1&limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "tv-shows"
+                  ],
+                  "query": [
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    },
+                    {
+                      "key": "status",
+                      "value": "",
+                      "description": "published | draft | processing | moderation | rejected",
+                      "disabled": true
+                    },
+                    {
+                      "key": "search",
+                      "value": "",
+                      "description": "Search by title / description / tags",
+                      "disabled": true
+                    },
+                    {
+                      "key": "genre",
+                      "value": "",
+                      "description": "Genre ObjectId",
+                      "disabled": true
+                    },
+                    {
+                      "key": "language",
+                      "value": "",
+                      "description": "Language ObjectId",
+                      "disabled": true
+                    },
+                    {
+                      "key": "featured",
+                      "value": "",
+                      "description": "true | false",
+                      "disabled": true
+                    },
+                    {
+                      "key": "trending",
+                      "value": "",
+                      "description": "true | false",
+                      "disabled": true
+                    },
+                    {
+                      "key": "year",
+                      "value": "",
+                      "description": "Filter by release year",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Paginated list of all TV shows with populated genres, categories, languages, cast, crew, subtitles."
+              }
+            },
+            {
+              "name": "Get TV Show by ID",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/tv-shows/{{contentId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "tv-shows",
+                    "{{contentId}}"
+                  ]
+                },
+                "description": "Get full TV show document by ID. Also auto-syncs HLS quality variants from disk if missing in DB."
+              }
+            },
+            {
+              "name": "Create TV Show",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/tv-shows",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "tv-shows"
+                  ]
+                },
+                "description": "Create a new web series / TV show.\n\nIf hlsUrl is a local MP4 (not .m3u8), HLS transcoding is queued automatically.\nIf status is published, a push notification is sent to all users.\nsections[] = array of Section IDs to include this show in.\n\nRequired: title, status\ncontentType values: tvshow | drama\nplanRequired values: free | basic | standard | premium\nstatus values: published | draft | processing | moderation | rejected",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"Mohabbat Ki Raahein\",\n  \"originalTitle\": \"\",\n  \"description\": \"A romantic drama set in the streets of Delhi.\",\n  \"shortDescription\": \"A love story that defies all odds.\",\n  \"contentType\": \"tvshow\",\n  \"status\": \"published\",\n  \"planRequired\": \"free\",\n  \"genres\": [\n    \"<genre_id>\"\n  ],\n  \"languages\": [\n    \"<language_id>\"\n  ],\n  \"categories\": [],\n  \"year\": 2024,\n  \"rating\": 8.2,\n  \"ageRating\": 13,\n  \"imdbRating\": 7.8,\n  \"thumbnail\": \"media/thumbnails/series.jpg\",\n  \"bannerImage\": \"media/banners/series.jpg\",\n  \"posterImage\": \"media/posters/series.jpg\",\n  \"trailerUrl\": \"https://cdn.example.com/trailers/trailer.m3u8\",\n  \"featured\": true,\n  \"trending\": true,\n  \"isExclusive\": false,\n  \"country\": \"India\",\n  \"studio\": \"Ashqe Originals\",\n  \"releaseDate\": \"2024-01-15\",\n  \"sections\": [],\n  \"cast\": [\n    {\n      \"actor\": \"<actor_id>\",\n      \"role\": \"Actor\",\n      \"character\": \"Zara\"\n    }\n  ],\n  \"crew\": [\n    {\n      \"director\": \"<director_id>\",\n      \"role\": \"Director\"\n    }\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Update TV Show",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/tv-shows/{{contentId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "tv-shows",
+                    "{{contentId}}"
+                  ]
+                },
+                "description": "Update any field on an existing TV show via $set. Partial updates supported.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"Updated Series Title\",\n  \"featured\": false,\n  \"trending\": true,\n  \"planRequired\": \"basic\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Delete TV Show",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/tv-shows/{{contentId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "tv-shows",
+                    "{{contentId}}"
+                  ]
+                },
+                "description": "Delete a TV show AND ALL its episodes. Also removes the show from all sections it was assigned to."
+              }
+            },
+            {
+              "name": "Update TV Show Status",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/tv-shows/{{contentId}}/status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "tv-shows",
+                    "{{contentId}}",
+                    "status"
+                  ]
+                },
+                "description": "Change publish status. Values: published | draft | processing | moderation | rejected",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"status\": \"published\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Toggle Featured",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/tv-shows/{{contentId}}/featured",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "tv-shows",
+                    "{{contentId}}",
+                    "featured"
+                  ]
+                },
+                "description": "Toggle the featured flag. No body needed — automatically flips current value."
+              }
+            },
+            {
+              "name": "Toggle Trending",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/tv-shows/{{contentId}}/trending",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "tv-shows",
+                    "{{contentId}}",
+                    "trending"
+                  ]
+                },
+                "description": "Toggle the trending flag. No body needed — automatically flips current value."
+              }
+            },
+            {
+              "name": "Get Pending Approvals",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/tv-shows/pending-approvals?page=1&limit=20",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "tv-shows",
+                    "pending-approvals"
+                  ],
+                  "query": [
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "20"
+                    }
+                  ]
+                },
+                "description": "Returns TV shows in moderation status waiting for admin approval. Shows createdBy (name + email)."
+              }
+            },
+            {
+              "name": "Approve TV Show",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/tv-shows/item/{{contentId}}/approve",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "tv-shows",
+                    "item",
+                    "{{contentId}}",
+                    "approve"
+                  ]
+                },
+                "description": "Approve a TV show. Sets status = published, records approvedBy + approvedAt, sends approval email to creator."
+              }
+            },
+            {
+              "name": "Reject TV Show",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/tv-shows/item/{{contentId}}/reject",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "tv-shows",
+                    "item",
+                    "{{contentId}}",
+                    "reject"
+                  ]
+                },
+                "description": "Reject a TV show. Sets status = rejected, records rejectedBy + rejectedAt + reason. Sends rejection email to creator.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reason\": \"Content does not meet quality standards.\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Get HLS Processing Status",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/tv-shows/{{contentId}}/processing-status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "tv-shows",
+                    "{{contentId}}",
+                    "processing-status"
+                  ]
+                },
+                "description": "Lightweight polling endpoint for HLS transcoding status.\n\nprocessingStatus values: queued | processing | ready | failed\n\nPoll this every 5s while status = queued or processing.\nReturns: id, title, status, processingStatus, processingError, hlsUrl, availableQualities[], qualityCount, isReady, isFailed"
+              }
+            }
+          ]
+        },
+        {
+          "name": "5. Admin — Episodes CRUD (admin JWT + RBAC 🔐)",
+          "description": "Admin panel endpoints for managing episodes within a TV show.",
+          "item": [
+            {
+              "name": "List All Episodes",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/episodes?tvShowId={{contentId}}&page=1&limit=50",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "episodes"
+                  ],
+                  "query": [
+                    {
+                      "key": "tvShowId",
+                      "value": "{{contentId}}",
+                      "description": "Filter by TV Show ID (recommended)"
+                    },
+                    {
+                      "key": "page",
+                      "value": "1"
+                    },
+                    {
+                      "key": "limit",
+                      "value": "50"
+                    },
+                    {
+                      "key": "season",
+                      "value": "",
+                      "description": "Filter by season number",
+                      "disabled": true
+                    },
+                    {
+                      "key": "search",
+                      "value": "",
+                      "description": "Search by title/description",
+                      "disabled": true
+                    },
+                    {
+                      "key": "TVShowType",
+                      "value": "",
+                      "description": "drama | movie (filter by show type)",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Paginated list of episodes. Filter by tvShowId to get episodes for one show. Each episode includes: showName, showThumbnail, populated subtitle/audio languages."
+              }
+            },
+            {
+              "name": "Get Seasons List",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/episodes/seasons?tvShowId={{contentId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "episodes",
+                    "seasons"
+                  ],
+                  "query": [
+                    {
+                      "key": "tvShowId",
+                      "value": "{{contentId}}",
+                      "description": "Filter by TV Show ID"
+                    },
+                    {
+                      "key": "TVShowType",
+                      "value": "",
+                      "description": "drama | movie (optional)",
+                      "disabled": true
+                    }
+                  ]
+                },
+                "description": "Aggregated seasons list grouped by season number.\nEach season: { seasonId, tvShowId, season, episodeCount, showName, thumbnail, status }"
+              }
+            },
+            {
+              "name": "Get Episode by ID",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/episodes/{{episodeId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "episodes",
+                    "{{episodeId}}"
+                  ]
+                },
+                "description": "Get full episode document by ID. Also auto-syncs HLS quality variants from disk if missing."
+              }
+            },
+            {
+              "name": "Create Episode",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/episodes",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "episodes"
+                  ]
+                },
+                "description": "Create a new episode for a TV show.\n\nIf sourceVideoUrl or hlsUrl is a local MP4 (not .m3u8), HLS transcoding is queued automatically.\nisFree: true = no subscription needed\nisLocked: true = subscription required\n\nRequired: tvShowId, season, episode, title",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"tvShowId\": \"{{contentId}}\",\n  \"season\": 1,\n  \"episode\": 1,\n  \"title\": \"Naya Safar\",\n  \"description\": \"The journey begins as Zara arrives in Delhi.\",\n  \"thumbnail\": \"media/thumbnails/ep1.jpg\",\n  \"sourceVideoUrl\": \"media/videos/ep1.mp4\",\n  \"hlsUrl\": \"hls/ep1/index.m3u8\",\n  \"duration\": 2580,\n  \"isFree\": true,\n  \"isLocked\": false,\n  \"subtitleLanguages\": [],\n  \"audioLanguages\": [],\n  \"subtitles\": []\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Update Episode",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/episodes/{{episodeId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "episodes",
+                    "{{episodeId}}"
+                  ]
+                },
+                "description": "Update any field on an existing episode. If sourceVideoUrl changes to a new local MP4, HLS transcoding is re-queued. Auto-syncs HLS qualities after update.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"Updated Episode Title\",\n  \"description\": \"Updated description.\",\n  \"isFree\": false,\n  \"duration\": 2700\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "name": "Delete Episode",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/episodes/{{episodeId}}",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "episodes",
+                    "{{episodeId}}"
+                  ]
+                },
+                "description": "Permanently delete an episode. Does NOT delete the parent TV show."
+              }
+            },
+            {
+              "name": "Toggle Episode Lock (Free / Paid)",
+              "request": {
+                "method": "PATCH",
+                "header": [
+                  {
+                    "key": "Authorization",
+                    "value": "Bearer {{accessToken}}"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/episodes/{{episodeId}}/lock",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "episodes",
+                    "{{episodeId}}",
+                    "lock"
+                  ]
+                },
+                "description": "Set whether an episode is locked (paid) or free.\n\nisLocked: false + isFree: true = free episode, no subscription needed\nisLocked: true = paid episode, subscription required\n\nThis is the main paywall control for individual episodes on the app.",
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"isLocked\": false\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "06 — Watch / Video Player",
+      "description": "Video player page data — HLS URL, quality list, episode list, progress — auth optional",
+      "item": [
+        {
+          "name": "Watch — Movie",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "Optional — unlocks premium content"
+              },
+              {
+                "key": "x-profile-id",
+                "value": "{{profileId}}",
+                "description": "Optional — sub-profile for progress tracking",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/watch/{{contentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "watch",
+                "{{contentId}}"
+              ]
+            },
+            "description": "Get video player data for a movie.\n\nPass the movie `_id` as `contentId`.\n\n**Response:**\n```json\n{\n  \"content\": { title, thumbnail, genres, cast, crew, related },\n  \"currentEpisode\": {\n    \"hlsUrl\": \"...\",\n    \"videoSettings\": [ { key, label, url, requiresPlan, isLocked } ],\n    \"watchProgress\": { progressSeconds, durationSeconds, progressPercent },\n    \"isLocked\": false\n  },\n  \"playbackSpeeds\": [...],\n  \"userAccess\": { userPlan, canAccessCurrentEpisode, requiresSubscription }\n}\n```"
+          }
+        },
+        {
+          "name": "Watch — TV Show (Season + Episode)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "Optional — unlocks premium episodes"
+              },
+              {
+                "key": "x-profile-id",
+                "value": "{{profileId}}",
+                "description": "Optional — sub-profile for progress tracking",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/watch/{{contentId}}?season=1&episode=1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "watch",
+                "{{contentId}}"
+              ],
+              "query": [
+                {
+                  "key": "season",
+                  "value": "1",
+                  "description": "Season number"
+                },
+                {
+                  "key": "episode",
+                  "value": "1",
+                  "description": "Episode number"
+                }
+              ]
+            },
+            "description": "Get watch data for a specific season + episode of a TV show.\n\nPass the TVShow `_id` as `contentId`.\n\n**Quality Gate:**\n- `auto` — free\n- `480p` — free\n- `720p HD` — basic plan\n- `1080p Full HD` — standard plan\n- `4K Ultra HD` — premium plan"
+          }
+        },
+        {
+          "name": "Watch — TV Show (by Episode ID)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "Optional"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/watch/{{contentId}}?episodeId={{episodeId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "watch",
+                "{{contentId}}"
+              ],
+              "query": [
+                {
+                  "key": "episodeId",
+                  "value": "{{episodeId}}",
+                  "description": "Direct episode ObjectId — overrides season+episode"
+                }
+              ]
+            },
+            "description": "Get watch data for a TV show episode using its direct episode `_id`.\nUseful when navigating from history or episode list."
+          }
+        }
+      ]
+    },
+    {
+      "name": "07 — Watch Progress & History",
+      "description": "Save/get watch position and history — all require 🔐 auth",
+      "item": [
+        {
+          "name": "Save Watch Progress",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "x-profile-id",
+                "value": "{{profileId}}",
+                "description": "Optional — sub-profile tracking",
+                "disabled": true
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/watch/progress",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "watch",
+                "progress"
+              ]
+            },
+            "description": "Upsert watch progress. Call every ~10–30 seconds during playback.\n\n**Required:** `contentId`, `progressSeconds`, `durationSeconds`\n**Optional:** `episodeId` (for TV episodes — pass episode `_id`, not show `_id`), `contentType`\n\nAlso increments `User.totalWatchTime` by the delta since last save.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contentId\": \"{{contentId}}\",\n  \"episodeId\": \"{{episodeId}}\",\n  \"progressSeconds\": 1200,\n  \"durationSeconds\": 2580,\n  \"contentType\": \"tvshow\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get Watch Progress (Single Item)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/watch/progress?contentId={{contentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "watch",
+                "progress"
+              ],
+              "query": [
+                {
+                  "key": "contentId",
+                  "value": "{{contentId}}",
+                  "description": "Movie/Show ID — or Episode ID"
+                },
+                {
+                  "key": "episodeId",
+                  "value": "",
+                  "description": "Episode ID — overrides contentId for episodes",
+                  "disabled": true
+                },
+                {
+                  "key": "profileId",
+                  "value": "",
+                  "description": "Sub-profile ID (optional)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Returns `progressSeconds`, `durationSeconds`, `progressPercent` for one content item. Returns `data: null` if no progress saved yet."
+          }
+        },
+        {
+          "name": "Get Watch History",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/watch/history?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "watch",
+                "history"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "profileId",
+                  "value": "",
+                  "description": "Filter by sub-profile (optional)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Returns paginated watch history sorted by most recently watched.\nDeduplicated by content — only most recent episode shown per show."
+          }
+        },
+        {
+          "name": "Clear Watch Progress (Single Item)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/watch/progress/{{contentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "watch",
+                "progress",
+                "{{contentId}}"
+              ]
+            },
+            "description": "Remove all watch progress records for a specific content (movie ID or episode ID)."
+          }
+        },
+        {
+          "name": "Delete History Item",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/watch/history/{{historyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "watch",
+                "history",
+                "{{historyId}}"
+              ]
+            },
+            "description": "Delete a single item from watch history.\nAccepts the progress document `_id` or the `contentId`. Tries `_id` first, then falls back to `contentId`."
+          }
+        },
+        {
+          "name": "Clear All Watch History",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/watch/history/all",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "watch",
+                "history",
+                "all"
+              ]
+            },
+            "description": "Delete ALL watch history and progress records for the authenticated user."
+          }
+        }
+      ]
+    },
+    {
+      "name": "08 — Like / Unlike",
+      "description": "Toggle like on content — requires 🔐 auth",
+      "item": [
+        {
+          "name": "Toggle Like",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/like/{{contentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "like",
+                "{{contentId}}"
+              ]
+            },
+            "description": "Toggle like on a movie or TV show.\n- Not liked → likes it → `isLikedByUser: true`\n- Already liked → unlikes it → `isLikedByUser: false`\n\n**contentType values:** `movie` | `tvshow` | `drama`\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"message\": \"Video liked successfully\",\n  \"data\": { \"likeCount\": 4201, \"isLikedByUser\": true }\n}\n```",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contentType\": \"tvshow\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "09 — Wishlist (Watchlist)",
+      "description": "Add/remove content from watchlist and fetch the list — requires 🔐 auth",
+      "item": [
+        {
+          "name": "Toggle Wishlist (URL param)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/wishlist/{{contentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "wishlist",
+                "{{contentId}}"
+              ]
+            },
+            "description": "Toggle watchlist via URL param.\n- Not wishlisted → adds → `isWishlisted: true`\n- Already wishlisted → removes → `isWishlisted: false`\n\n**contentType values:** `movie` | `tvshow` | `drama`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contentType\": \"tvshow\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Toggle Wishlist (body)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/wishlist",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "wishlist"
+              ]
+            },
+            "description": "Alternative form — pass `contentId` in the request body instead of the URL.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contentId\": \"{{contentId}}\",\n  \"contentType\": \"tvshow\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get Wishlist",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/wishlist?page=1&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "wishlist"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                },
+                {
+                  "key": "profileId",
+                  "value": "",
+                  "description": "Sub-profile ID (optional)",
+                  "disabled": true
+                }
+              ]
+            },
+            "description": "Returns paginated wishlist items with:\n`id`, `contentId`, `title`, `poster`, `backdrop`, `type`, `year`, `duration`, `imdbRating`, `ageRating`, `description`, `language`, `genres[]`, `addedAt`"
+          }
+        }
+      ]
+    },
+    {
+      "name": "10 — Reviews",
+      "description": "Platform reviews (not per-content) — GET public, POST/DELETE require 🔐 auth",
+      "item": [
+        {
+          "name": "Get Reviews (Public)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/app/reviews?page=1&limit=10",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "reviews"
+              ],
+              "query": [
+                {
+                  "key": "page",
+                  "value": "1"
+                },
+                {
+                  "key": "limit",
+                  "value": "10"
+                }
+              ]
+            },
+            "description": "Returns published platform reviews with:\n- `data[]` — reviews with userId.name, userId.avatar, rating, comment\n- `stats` — averageRating, totalReviews, distribution (star 1–5 counts)\n- `pagination`"
+          }
+        },
+        {
+          "name": "Submit Review",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/reviews",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "reviews"
+              ]
+            },
+            "description": "Submit a platform review.\nEach user can only submit ONE review — returns 400 if they already have one.\n\n**rating:** 1–5 (required)\n**comment:** string (optional)",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rating\": 5,\n  \"comment\": \"Amazing content! Best OTT app for web series.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Delete My Review",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/reviews/{{reviewId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "reviews",
+                "{{reviewId}}"
+              ]
+            },
+            "description": "Delete your own review by its document `_id`. Returns 404 if not found or not owned by you."
+          }
+        }
+      ]
+    },
+    {
+      "name": "11 — Downloads",
+      "description": "Offline download authorization — requires 🔐 auth + active paid subscription with downloadStatus=true",
+      "item": [
+        {
+          "name": "Request Download",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/download",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "download"
+              ]
+            },
+            "description": "Authorize a movie for offline download.\n\n**Checks:**\n1. User must have an active paid subscription\n2. Plan must have `downloadStatus = true`\n3. Download limit not exceeded\n4. Movie must have `downloadAllowed = true`\n5. Movie must have a non-HLS progressive MP4 file\n\n**Response:**\n```json\n{\n  \"success\": true,\n  \"data\": {\n    \"id\": \"...\",\n    \"downloadUrl\": \"https://...\",\n    \"isHls\": false,\n    \"videoQualities\": [{ \"quality\": \"720p\", \"label\": \"720P\", \"sizeFormatted\": \"850 MB\", \"url\": \"...\" }],\n    \"downloadLimit\": 10,\n    \"downloadUsed\": 3\n  }\n}\n```\n\n**Error 403:** Free plan or download limit reached\n**Error 404:** No downloadable file found",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contentId\": \"{{contentId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Get Downloads List",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/downloads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "downloads"
+              ]
+            },
+            "description": "Returns all authorized downloads for the user with `downloadUrl`, quality list, status, and progress."
+          }
+        },
+        {
+          "name": "Remove Download (Single)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/downloads/{{downloadId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "downloads",
+                "{{downloadId}}"
+              ]
+            },
+            "description": "Remove a single download record by its document `_id`."
+          }
+        },
+        {
+          "name": "Remove All Downloads",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/downloads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "downloads"
+              ]
+            },
+            "description": "Delete ALL download records for the authenticated user."
+          }
+        }
+      ]
+    },
+    {
+      "name": "12 — Share",
+      "description": "Smart deep-link share redirect and share count tracking",
+      "item": [
+        {
+          "name": "Share Redirect (Deep Link)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/share/{{contentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "share",
+                "{{contentId}}"
+              ]
+            },
+            "description": "Smart deep-link redirect page. Increments share count, then:\n- Android → opens app via Intent or falls back to Play Store\n- iOS → opens app via custom scheme or falls back to App Store\n- Desktop → redirects to web player\n\nThis is the URL you embed in `shareUrl` shared via WhatsApp/social media."
+          }
+        },
+        {
+          "name": "Record Share (API)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "Optional"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/share/{{contentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "share",
+                "{{contentId}}"
+              ]
+            },
+            "description": "Increment share count for a content item via API (without redirect).\nCall when the user taps the share button in-app.\n\n**Returns:** `{ success: true, data: { sharesCount: 43 } }`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contentType\": \"tvshow\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "13 — Views (Track View Count)",
+      "description": "Record a content view — auth optional",
+      "item": [
+        {
+          "name": "Record View",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}",
+                "description": "Optional"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/views/{{contentId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "views",
+                "{{contentId}}"
+              ]
+            },
+            "description": "Increment view count for a content item.\nCall once when the user starts playing (not repeatedly).\n\n**contentType:** `movie` | `tvshow`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"contentType\": \"tvshow\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "14 — Subscription & Plans",
+      "description": "Plans list (public) + Razorpay payment flow (requires 🔐 auth)",
+      "item": [
+        {
+          "name": "Get App Plans (Public)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/app/plans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "plans"
+              ]
+            },
+            "description": "Returns all active subscription plans for the paywall/subscription screen.\nNo auth required.\n\n**Response per plan:**\n- `id`, `name`, `duration`, `durationValue`\n- `price` — original price\n- `discount` — % discount\n- `totalPrice` — final charge amount\n- `description`, `level`"
+          }
+        },
+        {
+          "name": "Create Razorpay Order",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const r = pm.response.json();",
+                  "if (r.order?.id) {",
+                  "  pm.collectionVariables.set('razorpayOrderId', r.order.id);",
+                  "  console.log('✅ Razorpay Order ID:', r.order.id);",
+                  "}",
+                  "if (r.isFree) console.log('✅ Free plan activated directly.');"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/subscription/razorpay/order",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "subscription",
+                "razorpay",
+                "order"
+              ]
+            },
+            "description": "Create a Razorpay payment order.\n\n**Returns:**\n```json\n{\n  \"success\": true,\n  \"order\": { \"id\": \"order_XXXX\", \"amount\": 29900, \"currency\": \"INR\" },\n  \"keyId\": \"rzp_live_XXXX\"\n}\n```\n\n**Free plan** (totalPrice = 0): plan is activated directly without Razorpay, returns `{ isFree: true, subscriptionId: ... }`\n\nUse `order.id` + `keyId` to open Razorpay checkout in Flutter.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"planId\": \"{{planId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Verify Razorpay Payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/subscription/razorpay/verify",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "subscription",
+                "razorpay",
+                "verify"
+              ]
+            },
+            "description": "Verify Razorpay HMAC signature and activate the subscription.\n\n**On success:**\n- Old active subscriptions marked inactive\n- New subscription created\n- `User.subscriptionPlan`, `subscriptionStatus`, `subscriptionExpiry` updated\n\n**Returns:**\n```json\n{\n  \"success\": true,\n  \"subscription\": true,\n  \"subscriptionPlan\": \"Premium Monthly\",\n  \"subscriptionStatus\": \"active\",\n  \"subscriptionExpiry\": \"2026-10-25T...\"\n}\n```",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"razorpay_order_id\": \"order_XXXXXXXXXX\",\n  \"razorpay_payment_id\": \"pay_XXXXXXXXXX\",\n  \"razorpay_signature\": \"<hmac_sha256_of_orderId|paymentId>\",\n  \"planId\": \"{{planId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "15 — User Profile",
+      "description": "Profile, settings, devices, sub-profiles — all require 🔐 auth",
+      "item": [
+        {
+          "name": "Get Profile",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "profile"
+              ]
+            },
+            "description": "Returns full profile data:\n- `name`, `email`, `phone`, `avatar`\n- `subscriptionPlan`, `subscriptionStatus`, `subscriptionExpiry`\n- `preferredLanguage`, `videoQuality`\n- `profiles[]` — sub-profiles (name, isKids, maturityLevel, language)\n- `devices[]` — logged-in devices\n- `watchlistCount`, `totalWatchTime`\n- `planLimits` — deviceLimitCount, downloadLimitCount, profileLimitCount, downloadStatus\n- `languages[]` — all available languages for picker\n- `pages[]` — Terms & Conditions, Privacy Policy links"
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "profile"
+              ]
+            },
+            "description": "Update name and/or email address.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Name\",\n  \"email\": \"newemail@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Update Profile (PUT alias)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/profile",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "profile"
+              ]
+            },
+            "description": "Same as PATCH /profile — provided for clients that only support PUT.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Name\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Upload Avatar",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/profile/avatar",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "profile",
+                "avatar"
+              ]
+            },
+            "description": "Upload avatar image as `multipart/form-data`.\nField name: `avatar`. Accepts JPG, PNG, WEBP.",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "avatar",
+                  "type": "file",
+                  "description": "Image file (jpg/png/webp)"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Set Video Quality",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/profile/video-quality",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "profile",
+                "video-quality"
+              ]
+            },
+            "description": "Set preferred video quality.\n\n**quality values:** `auto` | `144p` | `240p` | `360p` | `480p` | `720p` | `1080p` | `1440p` | `2160p`",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"quality\": \"720p\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Set Preferred Language",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/profile/language",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "profile",
+                "language"
+              ]
+            },
+            "description": "Update preferred content language. Use this for the in-app language picker (settings screen).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language\": \"Hindi\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Delete Account",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/account",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "account"
+              ]
+            },
+            "description": "Permanently delete the user's account and all associated data.\n⚠️ This action is irreversible."
+          }
+        },
+        {
+          "name": "Get Devices",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/devices",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "devices"
+              ]
+            },
+            "description": "Returns list of logged-in devices:\n- `deviceId`, `deviceName`, `deviceType`, `lastActive`, `addedAt`"
+          }
+        },
+        {
+          "name": "Remove Device",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/devices/:deviceId",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "devices",
+                ":deviceId"
+              ],
+              "variable": [
+                {
+                  "key": "deviceId",
+                  "value": "device-abc-001",
+                  "description": "The device's unique deviceId string"
+                }
+              ]
+            },
+            "description": "Remove a specific device from the user's device list.\nThe user will be forced to log in again on that device."
+          }
+        },
+        {
+          "name": "Get Sub-Profiles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/profiles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "profiles"
+              ]
+            },
+            "description": "Returns all sub-profiles for the account (e.g. Kids, Adult).\nMax allowed profiles is determined by plan's `profileLimitCount`."
+          }
+        },
+        {
+          "name": "Create Sub-Profile",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/profiles",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "profiles"
+              ]
+            },
+            "description": "Create a new sub-profile. Returns 403 if plan limit reached.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Kids Profile\",\n  \"isKids\": true,\n  \"maturityLevel\": 7,\n  \"language\": \"Hindi\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Update Sub-Profile",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/profiles/{{profileId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "profiles",
+                "{{profileId}}"
+              ]
+            },
+            "description": "Update sub-profile name, isKids flag, maturityLevel, or language.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Updated Name\",\n  \"isKids\": false,\n  \"maturityLevel\": 18,\n  \"language\": \"English\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Delete Sub-Profile",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/profiles/{{profileId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "profiles",
+                "{{profileId}}"
+              ]
+            },
+            "description": "Delete a sub-profile. Cannot delete the primary (first/index-0) profile."
+          }
+        }
+      ]
+    },
+    {
+      "name": "16 — Notifications",
+      "description": "Push notifications — user notifications require 🔐 auth",
+      "item": [
+        {
+          "name": "Get My Notifications",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{accessToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/app/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app",
+                "notifications"
+              ]
+            },
+            "description": "Returns up to 20 recent notifications targeted to the user.\nIncludes notifications targeted at:\n- `all` users\n- User's specific subscription plan (free/premium)\n- User by direct `targetUserIds`"
+          }
+        },
+        {
+          "name": "Get Public Notifications",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/public/notifications",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "public",
+                "notifications"
+              ]
+            },
+            "description": "Public notifications — no auth required. Returns empty array by default."
+          }
+        }
+      ]
+    },
+    {
+      "name": "17 — App Settings & Config",
+      "description": "App-wide config — no auth required",
+      "item": [
+        {
+          "name": "Get App Settings (Home Layout)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/app-settings",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "app-settings"
+              ]
+            },
+            "description": "Returns the mobile home screen layout configuration:\n- `banner`, `continue-watching`, `top-10`, `advertisement`\n- `new-released-movies`, `popular-language`, `top-channels`\n- `popular-personalities`, `free-movies`, `genres`\n- `popular-categories`, `rate-our-app`, `most-watched-videos`\n\nEach section has: `id`, `name`, `enabled`, `type` (simple|select), `selectedItems[]`, `order`"
+          }
+        },
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "health"
+              ]
+            },
+            "description": "Server health check. Returns 200 OK with status: ok. Use for connectivity checks."
+          }
+        }
+      ]
+    }
+  ]
+}

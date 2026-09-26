@@ -327,8 +327,8 @@ export const getWebAllContent = async (request: FastifyRequest, reply: FastifyRe
   try {
     const selectFields = 'title description shortDescription thumbnail bannerImage posterImage year rating ageRating duration imdbRating createdAt featured trending isNewContent views genres languages trailerUrl hlsUrl videoUrl planRequired totalSeasons';
     const [moviesRaw, showsRaw] = await Promise.all([
-      MovieModel.find({ status: 'published' }).select(selectFields).populate('genres', 'name').lean(),
-      TVShowModel.find({ status: 'published' }).select(selectFields).populate('genres', 'name').lean(),
+      MovieModel.find({ status: 'published' }).select(selectFields).limit(300).sort({ createdAt: -1 }).populate('genres', 'name').lean(),
+      TVShowModel.find({ status: 'published' }).select(selectFields).limit(300).sort({ createdAt: -1 }).populate('genres', 'name').lean(),
     ]);
     const movies = tagKind(moviesRaw, 'movie').map((m: any) => mapContentItem(m));
     const tvShows = tagKind(showsRaw, 'show').map((m: any) => mapContentItem(m));

@@ -1,7 +1,6 @@
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import { MovieModel } from './src/models/Movie';
-import { ContentModel } from './src/models/Content';
 import { GenreModel } from './src/models/Genre';
 import { EpisodeModel } from './src/models/Episode';
 import { getWebHome } from './src/controllers/webHomeController';
