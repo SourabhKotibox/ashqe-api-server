@@ -23,9 +23,10 @@ export const saveWatchProgress = async (request: FastifyRequest, reply: FastifyR
       progressSeconds?: number;
       durationSeconds?: number;
       contentType?: string;
+      profileId?: string;
     };
     const { contentId, episodeId, progressSeconds, durationSeconds, contentType } = body;
-    const profileId = request.headers['x-profile-id'] as string | undefined;
+    const profileId = body.profileId || request.headers['x-profile-id'] as string | undefined;
 
     if (!contentId || progressSeconds === undefined || durationSeconds === undefined) {
       return reply.status(400).send({ success: false, message: 'contentId, progressSeconds, and durationSeconds are required.' });

@@ -27,7 +27,7 @@ const UserWatchProgressSchema = new Schema<IUserWatchProgress>(
   { timestamps: true }
 );
 
-// Unique constraint: one record per user per content
-UserWatchProgressSchema.index({ userId: 1, contentId: 1 }, { unique: true });
+// Unique constraint: one record per user per content per profile
+UserWatchProgressSchema.index({ userId: 1, contentId: 1, profileId: 1 }, { unique: true });
 
 export const UserWatchProgressModel = mongoose.model<IUserWatchProgress>('UserWatchProgress', UserWatchProgressSchema);
