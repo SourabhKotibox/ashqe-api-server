@@ -269,22 +269,33 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
       const mediaTypeFilter = section.filter?.mediaType;
       
       const filterMovie = buildFilter(baseMovieFilter);
-      if (filterMovie && (!mediaTypeFilter || mediaTypeFilter === 'movie' || mediaTypeFilter === 'mixed')) {
-        contentMovies = await MovieModel.find(filterMovie)
-          .sort(section.sortBy)
-          .limit(section.limit)
-          .populate('languages', 'name')
-          .populate('genres', 'name')
-          .lean();
+      
+      let shouldFetchMovies = (!mediaTypeFilter || mediaTypeFilter === 'movie' || mediaTypeFilter === 'mixed');
+      let shouldFetchShows = (!mediaTypeFilter || mediaTypeFilter === 'series' || mediaTypeFilter === 'tvshow' || mediaTypeFilter === 'webseries' || mediaTypeFilter === 'mixed');
+      
+      if (!mediaTypeFilter) {
+          if (section.contentType === 'movie') shouldFetchShows = false;
+          if (section.contentType === 'webseries' || section.contentType === 'tvshow') shouldFetchMovies = false;
       }
       
-      if (filterMovie && (!mediaTypeFilter || mediaTypeFilter === 'series' || mediaTypeFilter === 'tvshow' || mediaTypeFilter === 'mixed')) {
-        contentShows = await TVShowModel.find(filterMovie)
+      if (filterMovie && shouldFetchMovies) {
+        const rawM = await MovieModel.find(filterMovie)
           .sort(section.sortBy)
           .limit(section.limit)
           .populate('languages', 'name')
           .populate('genres', 'name')
           .lean();
+        contentMovies = rawM.map((m: any) => ({ ...m, _type: 'movie' }));
+      }
+      
+      if (filterMovie && shouldFetchShows) {
+        const rawS = await TVShowModel.find(filterMovie)
+          .sort(section.sortBy)
+          .limit(section.limit)
+          .populate('languages', 'name')
+          .populate('genres', 'name')
+          .lean();
+        contentShows = rawS.map((s: any) => ({ ...s, _type: 'show' }));
       }
 
       // Merge and sort again if necessary, then limit
@@ -371,7 +382,7 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
         const cid = item._id.toString();
         const likeCount = item.likes || 0;
         const isLikedByUser = likedContentIdSet.has(cid);
-        return mapContentItem(item, resolveUrl, likeCount, isLikedByUser, userPlan);
+        return mapContentItem(item, resolveUrl, likeCount, isLikedByUser, userPlan, item._type || 'movie');
       }),
     }));
 
