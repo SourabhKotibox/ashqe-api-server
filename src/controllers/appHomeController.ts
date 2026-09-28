@@ -224,7 +224,10 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
     else if (requestedTab === 'webseries' || requestedTab === 'tvshow') contentTypes = ['webseries', 'tvshow'];
 
     const dbSections = await SectionModel.find({
-      contentType: { $in: contentTypes as any[] }, isActive: true })
+      contentType: { $in: contentTypes as any[] },
+      platform: { $ne: 'web' },
+      isActive: true 
+    })
       .select('key title category contentType sortBy limit position isActive layout showViewAll itemType filter contentSelection manualContentIds')
       .sort({ position: 1 })
       .lean();

@@ -33,13 +33,15 @@ const syncManualContent = async (section: any) => {
 export const getSections = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const query = request.query as {
-      contentType?: 'movie';
+      contentType?: string;
       activeOnly?: string;
+      platform?: string;
     };
 
     const filter: any = {};
     if (query.contentType) filter.contentType = query.contentType;
     if (query.activeOnly === 'true') filter.isActive = true;
+    if (query.platform) filter.platform = query.platform;
 
     const sections = await SectionModel.find(filter).sort({ position: 1 });
     reply.send({ success: true, data: sections });
