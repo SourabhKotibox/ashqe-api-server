@@ -161,16 +161,33 @@ export const requestDownload = async (request: FastifyRequest, reply: FastifyRep
       return reply.status(403).send({ success: false, message: limits.reason || 'Downloads not allowed' });
     }
 
-    const { contentId } = request.body as {
+    const { contentId, contentType, episodeId } = request.body as {
       contentId: string;
-      contentType?: 'movie';
+      contentType?: string;
+      episodeId?: string;
     };
 
-    if (!mongoose.Types.ObjectId.isValid(contentId)) {
-      return reply.status(400).send({ success: false, message: 'Invalid contentId' });
+    const lookupId = episodeId || contentId;
+    if (!mongoose.Types.ObjectId.isValid(lookupId)) {
+      return reply.status(400).send({ success: false, message: 'Invalid contentId or episodeId' });
     }
 
-    const existing = await UserDownloadModel.findOne({ userId: userObjectId, contentId }).lean();
+    const { resolveContent } = await import('../lib/contentResolver');
+    const resolved = await resolveContent(lookupId, episodeId ? 'episode' : contentType);
+    if (!resolved) {
+      return reply.status(404).send({ success: false, message: 'Content not found' });
+    }
+
+    const mediaDoc = resolved.doc;
+    if (mediaDoc.status && mediaDoc.status !== 'published') {
+      return reply.status(404).send({ success: false, message: 'Content not published' });
+    }
+
+    if (!mediaDoc.downloadAllowed && mediaDoc.downloadAllowed !== undefined) {
+      return reply.status(400).send({ success: false, message: 'Downloading is disabled for this content.' });
+    }
+
+    const existing = await UserDownloadModel.findOne({ userId: userObjectId, contentId: lookupId }).lean();
     if (!existing) {
       const count = await UserDownloadModel.countDocuments({ userId: userObjectId });
       if (count >= limits.max) {
@@ -184,35 +201,24 @@ export const requestDownload = async (request: FastifyRequest, reply: FastifyRep
       }
     }
 
-    const movie = await MovieModel.findById(contentId).lean();
-    if (!movie || movie.status !== 'published') {
-      return reply.status(404).send({ success: false, message: 'Movie not found' });
-    }
-
-    if (!movie.downloadAllowed) {
-      return reply.status(400).send({ success: false, message: 'Downloading is disabled for this movie.' });
-    }
-
-    const title = movie.title;
-    const thumbnail = toAbsoluteUrl(request, movie.thumbnail || '') || '';
-    const duration = movie.duration || 0;
-    const { url: downloadUrl, isHls } = pickDownloadUrl(movie, request);
+    const title = mediaDoc.title;
+    const thumbnail = toAbsoluteUrl(request, mediaDoc.thumbnail || '') || '';
+    const duration = mediaDoc.duration || 0;
+    const { url: downloadUrl, isHls } = pickDownloadUrl(mediaDoc, request);
     if (!downloadUrl) {
-      const hasHls = !!(movie as any).hlsUrl && String((movie as any).hlsUrl).includes('.m3u8');
-      const hasSource = !!(movie as any).sourceVideoUrl;
-      const hasVideo = !!(movie as any).videoUrl;
-      const hasQualities = (movie as any).videoQualities?.length > 0;
-      const trailer = (movie as any).trailerUrl;
+      const hasHls = !!(mediaDoc as any).hlsUrl && String((mediaDoc as any).hlsUrl).includes('.m3u8');
+      const hasSource = !!(mediaDoc as any).sourceVideoUrl;
+      const hasVideo = !!(mediaDoc as any).videoUrl;
+      const hasQualities = (mediaDoc as any).videoQualities?.length > 0;
+      const trailer = (mediaDoc as any).trailerUrl;
       const reason = hasHls
-        ? 'This movie is streaming-only (HLS). A progressive MP4 is required for offline download — re-upload the full movie file.'
-        : `No full movie file available for offline download. ` +
-          `Fields present — sourceVideoUrl: ${hasSource}, videoUrl: ${hasVideo}, qualities: ${hasQualities}, hls: ${hasHls}, trailer: ${!!trailer}. ` +
-          `Attach a progressive MP4 (not HLS, not trailer) in Media Library.`;
+        ? 'This content is streaming-only (HLS). A progressive MP4 is required for offline download.'
+        : `No full file available for offline download.`;
       return reply.status(404).send({
         success: false,
         message: reason,
         debug: {
-          title: movie.title,
+          title: mediaDoc.title,
           hasSourceVideoUrl: hasSource,
           hasVideoUrl: hasVideo,
           hasVideoQualities: hasQualities,
@@ -221,7 +227,7 @@ export const requestDownload = async (request: FastifyRequest, reply: FastifyRep
         }
       });
     }
-    const qualities = (movie.videoQualities || []).map((q: any) => ({
+    const qualities = (mediaDoc.videoQualities || []).map((q: any) => ({
       quality: q.quality,
       label: q.quality.toUpperCase(),
       size: q.size,
@@ -230,8 +236,8 @@ export const requestDownload = async (request: FastifyRequest, reply: FastifyRep
     }));
 
     const downloadDoc: any = await UserDownloadModel.findOneAndUpdate(
-      { userId: userObjectId, contentId },
-      { $setOnInsert: { contentModelType: 'Movie' } },
+      { userId: userObjectId, contentId: lookupId },
+      { $setOnInsert: { contentModelType: resolved.type } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
@@ -242,8 +248,8 @@ export const requestDownload = async (request: FastifyRequest, reply: FastifyRep
       data: {
         id: downloadDoc._id.toString(),
         userId: userId,
-        contentId: contentId,
-        contentType: 'movie',
+        contentId: lookupId,
+        contentType: resolved.type === 'Movie' ? 'movie' : 'series',
         title: title,
         thumbnail: thumbnail,
         duration: duration,
@@ -272,12 +278,15 @@ export const getDownloadList = async (request: FastifyRequest, reply: FastifyRep
     const downloads = await UserDownloadModel.find({ userId: userObjectId }).sort({ createdAt: -1 }).lean();
 
     const result = [];
+    const { resolveContent } = await import('../lib/contentResolver');
 
     for (const dl of downloads) {
-      const movie = await MovieModel.findById(dl.contentId).lean();
-      if (!movie || movie.status !== 'published') continue;
+      const resolved = await resolveContent(dl.contentId.toString(), dl.contentModelType);
+      if (!resolved) continue;
+      const mediaDoc = resolved.doc;
+      if (mediaDoc.status && mediaDoc.status !== 'published') continue;
 
-      const qualities = (movie.videoQualities || []).map((q: any) => ({
+      const qualities = (mediaDoc.videoQualities || []).map((q: any) => ({
         quality: q.quality,
         label: q.quality.toUpperCase(),
         size: q.size,
@@ -285,15 +294,15 @@ export const getDownloadList = async (request: FastifyRequest, reply: FastifyRep
         url: toAbsoluteUrl(request, q.url)
       }));
 
-      const { url: downloadUrl, isHls } = pickDownloadUrl(movie, request);
+      const { url: downloadUrl, isHls } = pickDownloadUrl(mediaDoc, request);
 
       result.push({
         id: dl._id.toString(),
         contentId: dl.contentId.toString(),
-        contentType: 'movie',
-        title: movie.title,
-        thumbnail: toAbsoluteUrl(request, movie.thumbnail || '') || '',
-        duration: movie.duration || 0,
+        contentType: resolved.type === 'Movie' ? 'movie' : 'series',
+        title: mediaDoc.title,
+        thumbnail: toAbsoluteUrl(request, mediaDoc.thumbnail || '') || '',
+        duration: mediaDoc.duration || 0,
         downloadUrl,
         isHls: isHls || false,
         videoQualities: qualities,

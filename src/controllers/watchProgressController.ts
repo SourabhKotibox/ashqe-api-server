@@ -93,9 +93,38 @@ export const getWatchProgressItem = async (request: FastifyRequest, reply: Fasti
 
     const { contentId, profileId, episodeId } = request.query as { contentId?: string; profileId?: string; episodeId?: string };
 
-    const lookupId = episodeId || contentId;
+    let lookupId = episodeId || contentId;
     if (!lookupId || !mongoose.Types.ObjectId.isValid(lookupId)) {
       return reply.status(400).send({ success: false, message: 'Valid contentId is required.' });
+    }
+
+    const { resolveContent } = await import('../lib/contentResolver');
+    const resolved = await resolveContent(lookupId);
+
+    // If they provided a TV Show ID but no episode ID, find their most recent watched episode for this show
+    if (resolved?.type === 'TVShow' && !episodeId) {
+      const { EpisodeModel } = await import('../models/Episode');
+      const episodes = await EpisodeModel.find({ tvShowId: resolved.doc._id }).select('_id').lean();
+      const episodeIds = episodes.map(e => e._id);
+      
+      const latestProgress = await UserWatchProgressModel.findOne({
+        userId: new mongoose.Types.ObjectId(userId),
+        contentId: { $in: episodeIds },
+        profileId: profileId || null
+      }).sort({ lastWatchedAt: -1 }).lean();
+
+      if (latestProgress) {
+        return reply.send({
+          success: true,
+          data: {
+            episodeId: latestProgress.contentId,
+            progressSeconds: latestProgress.progressSeconds,
+            durationSeconds: latestProgress.durationSeconds,
+            progressPercent: latestProgress.progressPercent,
+          }
+        });
+      }
+      return reply.send({ success: true, data: null });
     }
 
     const filter: any = {
@@ -109,6 +138,7 @@ export const getWatchProgressItem = async (request: FastifyRequest, reply: Fasti
     return reply.send({
       success: true,
       data: doc ? {
+        episodeId: doc.contentModelType === 'Episode' ? doc.contentId : undefined,
         progressSeconds: doc.progressSeconds,
         durationSeconds: doc.durationSeconds,
         progressPercent: doc.progressPercent,
