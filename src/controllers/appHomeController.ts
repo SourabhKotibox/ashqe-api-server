@@ -178,7 +178,10 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
     const query = request.query as {
       platform?: 'web' | 'mobile' | 'tv';
       limit?: string;
+      tab?: string;
     };
+
+    const requestedTab = query.tab || 'all';
 
     const { userId, profileId } = getAuthData(request);
 
@@ -216,8 +219,12 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
     }
 
     // Get sections from database, or fallback to default
+    let contentTypes = ['movie', 'mixed', 'webseries', 'tvshow', 'web'];
+    if (requestedTab === 'movie') contentTypes = ['movie', 'mixed'];
+    else if (requestedTab === 'webseries' || requestedTab === 'tvshow') contentTypes = ['webseries', 'tvshow'];
+
     const dbSections = await SectionModel.find({
-      contentType: { $in: ['movie', 'mixed'] as any[] }, isActive: true })
+      contentType: { $in: contentTypes as any[] }, isActive: true })
       .select('key title category contentType sortBy limit position isActive layout showViewAll itemType filter contentSelection manualContentIds')
       .sort({ position: 1 })
       .lean();
@@ -436,18 +443,19 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
 
     // Get Custom Tab Name
     const appSetting = await AppSettingModel.findOne({ key: 'home-tabs-config' }).lean();
-    let tabName = 'Movies';
+    let tabName = requestedTab === 'webseries' || requestedTab === 'tvshow' ? 'Web Series' : (requestedTab === 'all' ? 'Home' : 'Movies');
     if (appSetting && appSetting.value && Array.isArray(appSetting.value)) {
-      const tabConfig = appSetting.value.find((t: any) => t.id === 'movie');
+      const configKey = requestedTab === 'all' ? 'movie' : requestedTab;
+      const tabConfig = appSetting.value.find((t: any) => t.id === configKey);
       if (tabConfig && tabConfig.name) {
-        tabName = tabConfig.name;
+        tabName = requestedTab === 'all' ? 'Home' : tabConfig.name;
       }
     }
 
     return reply.send({
       success: true,
       data: {
-        tab: 'movie',
+        tab: requestedTab,
         tabName,
         sections: mappedSections,
       },
@@ -464,8 +472,10 @@ export const getAppBanners = async (request: FastifyRequest, reply: FastifyReply
     const query = request.query as {
       platform?: 'mobile' | 'web' | 'tv';
       limit?: string;
+      tab?: string;
     };
 
+    const requestedTab = query.tab || 'all';
     const platform = query.platform || 'mobile';
     const limit = Math.min(20, Math.max(1, Number(query.limit || 10)));
     const now = new Date();
@@ -473,9 +483,14 @@ export const getAppBanners = async (request: FastifyRequest, reply: FastifyReply
     // Build URL resolver (local storage)
     const resolveUrl = buildUrlResolver(request);
 
+    let contentTypes = ['movie', 'tvShow'];
+    if (requestedTab === 'movie') contentTypes = ['movie'];
+    else if (requestedTab === 'webseries' || requestedTab === 'tvshow') contentTypes = ['tvShow'];
+
     const bannersRaw = await BannerModel.find({
       isActive: true,
       targetPlatforms: platform,
+      contentType: { $in: contentTypes },
       $and: [
         { $or: [{ startDate: { $exists: false } }, { startDate: { $lte: now } }] },
         { $or: [{ endDate: { $exists: false } }, { endDate: { $gte: now } }] },
@@ -514,7 +529,7 @@ export const getAppBanners = async (request: FastifyRequest, reply: FastifyReply
     return reply.send({
       success: true,
       data: {
-        tab: 'movie',
+        tab: requestedTab,
         banners: mappedBanners,
       },
     });

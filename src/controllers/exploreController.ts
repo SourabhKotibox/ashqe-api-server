@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { MovieModel } from '../models/Movie';
+import { TVShowModel } from '../models/TVShow';
 import { UserLikeModel } from '../models/UserLike';
 import { UserModel } from '../models/User';
 import { LanguageModel } from '../models/Language';
@@ -50,6 +51,7 @@ const mapContentItem = (
   likeCount = 0,
   isLikedByUser = false,
   userPlan = 'free',
+  type: 'movie' | 'show' = 'movie',
 ) => {
   const contentPlan = item.planRequired || item.plan || 'free';
   const locked = isContentLocked(contentPlan, userPlan);
@@ -61,7 +63,8 @@ const mapContentItem = (
     shortDescription: item.shortDescription,
     thumbnail: toAbsoluteUrl(request, item.thumbnail),
     bannerImage: toAbsoluteUrl(request, item.bannerImage),
-    type: 'movie',
+    type,
+    contentType: type === 'show' ? 'tvShow' : 'movie',
     genres: (item.genres || []).map((g: any) => g.name || g),
     genresText: (item.genres || []).map((g: any) => g.name || g).join(' & '),
     languages: (item.languages || []).map((l: any) => l.name || l),
@@ -168,13 +171,52 @@ export const getExplore = async (request: FastifyRequest, reply: FastifyReply) =
     if (targetLanguageId) {
       langFilter.languages = targetLanguageId;
     }
-    const rawContents: any[] = await MovieModel.find(langFilter)
-      .sort(sortBy)
-      .skip(offset)
-      .limit(fetchLimit)
-      .populate('languages', 'name')
-      .populate('genres', 'name')
-      .lean();
+    
+    // To properly support pagination when merging two collections, we fetch from offset 0
+    // to offset + fetchLimit from BOTH collections, merge/sort, and then slice.
+    const combinedLimit = offset + fetchLimit;
+    
+    const [rawMovies, rawShows] = await Promise.all([
+      MovieModel.find(langFilter)
+        .sort(sortBy)
+        .limit(combinedLimit)
+        .populate('languages', 'name')
+        .populate('genres', 'name')
+        .lean(),
+      TVShowModel.find(langFilter)
+        .sort(sortBy)
+        .limit(combinedLimit)
+        .populate('languages', 'name')
+        .populate('genres', 'name')
+        .lean()
+    ]);
+
+    // Tag items
+    const taggedMovies = rawMovies.map(m => ({ ...m, _type: 'movie' }));
+    const taggedShows = rawShows.map(s => ({ ...s, _type: 'show' }));
+
+    const merged = [...taggedMovies, ...taggedShows];
+    
+    // Sort in memory based on the requested sort
+    const sortField = Object.keys(sortBy)[0] || 'createdAt';
+    const sortDir = sortBy[sortField] === -1 ? -1 : 1;
+    
+    merged.sort((a: any, b: any) => {
+      // For 'trending', 'views', 'featured', sort by that field, then fallback to createdAt
+      if (sortField !== 'createdAt') {
+         const valA = a[sortField] || 0;
+         const valB = b[sortField] || 0;
+         if (valA !== valB) {
+            return sortDir === -1 ? (valB - valA) : (valA - valB);
+         }
+      }
+      // Fallback or explicit 'createdAt'
+      const timeA = new Date(a.createdAt || 0).getTime();
+      const timeB = new Date(b.createdAt || 0).getTime();
+      return sortDir === -1 ? (timeB - timeA) : (timeA - timeB);
+    });
+
+    const rawContents = merged.slice(offset, offset + fetchLimit);
 
     logger.info(
       { offset, limit, fetchLimit, raw: rawContents.length },
@@ -219,7 +261,7 @@ export const getExplore = async (request: FastifyRequest, reply: FastifyReply) =
       const cid = content._id.toString();
       const likeCount: number = content.likes || 0;
       const isLikedByUser: boolean = likedContentIdSet.has(cid);
-      return mapContentItem(request, content, likeCount, isLikedByUser, userPlan);
+      return mapContentItem(request, content, likeCount, isLikedByUser, userPlan, content._type || 'movie');
     });
 
     // nextOffset moves forward by the full raw fetch batch size (not just unique count)
