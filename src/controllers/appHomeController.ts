@@ -236,13 +236,18 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
       const manualIds = (section as any).manualContentIds || [];
       const hasManual = manualIds.length > 0;
 
-      const buildFilter = (base: any) => {
+      const buildFilter = (base: any, restrictToManualOnly = false) => {
         const sectionFilter = { ...(section.filter || {}) };
 
         // Remove mediaType from filter so it doesn't try to query MongoDB for mediaType field
         delete sectionFilter.mediaType;
 
         const manualBase = { status: 'published' };
+        
+        if (restrictToManualOnly) {
+          return hasManual ? { ...manualBase, _id: { $in: manualIds } } : null;
+        }
+
         if ((section as any).contentSelection === 'manual') {
           return hasManual ? { ...manualBase, _id: { $in: manualIds } } : null;
         } else if ((section as any).contentSelection === 'mixed' && hasManual) {
@@ -268,18 +273,32 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
       // Determine if we should fetch movies, shows, or both
       const mediaTypeFilter = section.filter?.mediaType;
       
-      const filterMovie = buildFilter(baseMovieFilter);
+      let allowDynamicMovies = (!mediaTypeFilter || mediaTypeFilter === 'movie' || mediaTypeFilter === 'mixed');
+      let allowDynamicShows = (!mediaTypeFilter || mediaTypeFilter === 'series' || mediaTypeFilter === 'tvshow' || mediaTypeFilter === 'webseries' || mediaTypeFilter === 'mixed');
       
-      let shouldFetchMovies = (!mediaTypeFilter || mediaTypeFilter === 'movie' || mediaTypeFilter === 'mixed');
-      let shouldFetchShows = (!mediaTypeFilter || mediaTypeFilter === 'series' || mediaTypeFilter === 'tvshow' || mediaTypeFilter === 'webseries' || mediaTypeFilter === 'mixed');
-      
+      let allowManualMovies = true;
+      let allowManualShows = true;
+
       if (!mediaTypeFilter) {
-          if (section.contentType === 'movie') shouldFetchShows = false;
-          if (section.contentType === 'webseries' || section.contentType === 'tvshow') shouldFetchMovies = false;
+          if (section.contentType === 'movie') allowDynamicShows = false;
+          if (section.contentType === 'webseries' || section.contentType === 'tvshow') allowDynamicMovies = false;
+      }
+
+      // Strictly enforce tab boundaries (prevents accidental manual mixed content)
+      if (requestedTab === 'movie') {
+          allowDynamicShows = false;
+          allowManualShows = false;
+      }
+      if (requestedTab === 'webseries' || requestedTab === 'tvshow') {
+          allowDynamicMovies = false;
+          allowManualMovies = false;
       }
       
-      if (filterMovie && shouldFetchMovies) {
-        const rawM = await MovieModel.find(filterMovie)
+      const movieFilter = allowManualMovies ? buildFilter(baseMovieFilter, !allowDynamicMovies) : null;
+      const showFilter = allowManualShows ? buildFilter(baseMovieFilter, !allowDynamicShows) : null;
+      
+      if (movieFilter) {
+        const rawM = await MovieModel.find(movieFilter)
           .sort(section.sortBy)
           .limit(section.limit)
           .populate('languages', 'name')
@@ -288,8 +307,8 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
         contentMovies = rawM.map((m: any) => ({ ...m, _type: 'movie' }));
       }
       
-      if (filterMovie && shouldFetchShows) {
-        const rawS = await TVShowModel.find(filterMovie)
+      if (showFilter) {
+        const rawS = await TVShowModel.find(showFilter)
           .sort(section.sortBy)
           .limit(section.limit)
           .populate('languages', 'name')
