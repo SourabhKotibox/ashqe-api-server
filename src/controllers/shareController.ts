@@ -28,11 +28,21 @@ export const handleShareRedirect = async (request: FastifyRequest, reply: Fastif
   const query = request.query as { contentType?: string };
 
   await incrementShareCount(contentId, query.contentType);
+  
+  const resolved = await resolveContent(contentId, query.contentType);
+  let resolvedContentType = 'movie';
+  let webPath = 'movie';
+  if (resolved) {
+    if (resolved.type === 'TVShow' || resolved.type === 'Episode') {
+      resolvedContentType = 'webseries';
+      webPath = 'show';
+    }
+  }
 
   const playStoreUrl = `https://play.google.com/store/apps/details?id=${APP_PACKAGE_NAME}&referrer=movie_id%3D${contentId}`;
-  const androidIntent = `intent://watch/${contentId}#Intent;scheme=${APP_SCHEME};package=${APP_PACKAGE_NAME};S.browser_fallback_url=${encodeURIComponent(playStoreUrl)};end`;
+  const androidIntent = `intent://${resolvedContentType}/${contentId}#Intent;scheme=${APP_SCHEME};package=${APP_PACKAGE_NAME};S.browser_fallback_url=${encodeURIComponent(playStoreUrl)};end`;
   
-  const iosScheme = `${APP_SCHEME}://watch/${contentId}`;
+  const iosScheme = `${APP_SCHEME}://${resolvedContentType}/${contentId}`;
   const appStoreLink = `https://apps.apple.com/app/id${APP_STORE_ID}`;
 
   const html = `
@@ -61,7 +71,7 @@ export const handleShareRedirect = async (request: FastifyRequest, reply: Fastif
             }, 2500);
           } 
           else {
-            window.location.replace("${FRONTEND_URL}/watch/${contentId}");
+            window.location.replace("${FRONTEND_URL}/${webPath}/${contentId}");
           }
         });
       </script>
