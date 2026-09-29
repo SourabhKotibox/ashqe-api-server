@@ -135,7 +135,7 @@ const userCanDownload = async (userId: string): Promise<{ ok: boolean; message?:
   }
 
   const max = Math.max(0, Number((lim as any).downloadLimitCount ?? 10));
-  const used = await UserDownloadModel.countDocuments({ userId: new mongoose.Types.ObjectId(userId) });
+  const used = await UserDownloadModel.countDocuments({ userId: new (mongoose.Types.ObjectId as any)(userId) });
   if (used >= max) {
     return { ok: false, message: `Download limit reached (${max}). Remove an old download or upgrade your plan.`, max };
   }
@@ -152,10 +152,10 @@ export const webRequestDownload = async (request: FastifyRequest, reply: Fastify
     }
     const userId = userPayload.id;
 
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
+    if (!mongoose.isValidObjectId(userId)) {
       return reply.status(401).send({ success: false, message: 'Invalid user token' });
     }
-    const userObjectId = new mongoose.Types.ObjectId(userId);
+    const userObjectId = new (mongoose.Types.ObjectId as any)(userId);
 
     const entitlement = await userCanDownload(userId);
     if (!entitlement.ok) {
@@ -168,7 +168,7 @@ export const webRequestDownload = async (request: FastifyRequest, reply: Fastify
       profileId?: string;
     };
 
-    if (!contentId || !mongoose.Types.ObjectId.isValid(contentId)) {
+    if (!contentId || !mongoose.isValidObjectId(contentId)) {
       return reply.status(400).send({ success: false, message: 'Invalid or missing contentId' });
     }
 
@@ -266,10 +266,10 @@ export const webGetDownloads = async (request: FastifyRequest, reply: FastifyRep
       return reply.status(401).send({ success: false, message: 'Unauthorized' });
     }
     const userId = userPayload.id;
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
+    if (!mongoose.isValidObjectId(userId)) {
       return reply.status(401).send({ success: false, message: 'Invalid user token' });
     }
-    const userObjectId = new mongoose.Types.ObjectId(userId);
+    const userObjectId = new (mongoose.Types.ObjectId as any)(userId);
 
     const { profileId } = request.query as { profileId?: string };
     const filter: any = { userId: userObjectId };
@@ -310,19 +310,19 @@ export const webDeleteDownload = async (request: FastifyRequest, reply: FastifyR
       return reply.status(401).send({ success: false, message: 'Unauthorized' });
     }
     const userId = userPayload.id;
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
+    if (!mongoose.isValidObjectId(userId)) {
       return reply.status(401).send({ success: false, message: 'Invalid user token' });
     }
-    const userObjectId = new mongoose.Types.ObjectId(userId);
+    const userObjectId = new (mongoose.Types.ObjectId as any)(userId);
 
     const { id } = request.params as { id: string };
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!mongoose.isValidObjectId(id)) {
       return reply.status(400).send({ success: false, message: 'Invalid download ID' });
     }
 
     const deleted = await UserDownloadModel.findOneAndDelete({
-      _id: new mongoose.Types.ObjectId(id),
+      _id: new (mongoose.Types.ObjectId as any)(id),
       userId: userObjectId,
     });
 
