@@ -46,60 +46,16 @@ export const handleShareRedirect = async (request: FastifyRequest, reply: Fastif
   const appStoreLink = `https://apps.apple.com/app/id${APP_STORE_ID}`;
   const webUrl = `${FRONTEND_URL}/${webPath}/${contentId}`;
 
-  const format = (request.query as any).format;
-  const acceptsJson = request.headers.accept?.includes('application/json') || format === 'json';
-
-  if (acceptsJson) {
-    return reply.send({
-      success: true,
-      data: {
-        contentId,
-        contentType: resolvedContentType,
-        webUrl,
-        androidIntent,
-        iosScheme
-      }
-    });
-  }
-
-  const html = `
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Opening Ashqe...</title>
-      <style>
-        body { background: #000; color: #fff; font-family: sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
-        .loader { border: 4px solid #333; border-top: 4px solid #ff0055; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
-        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-      </style>
-      <script>
-        document.addEventListener("DOMContentLoaded", function() {
-          var userAgent = navigator.userAgent || navigator.vendor || window.opera;
-          
-          if (/android/i.test(userAgent)) {
-            window.location.replace("${androidIntent}");
-          } 
-          else if (/iPad|iPhone|iPod/.test(userAgent) && !window.MSStream) {
-            window.location.replace("${iosScheme}");
-            setTimeout(function() {
-              window.location.replace("${appStoreLink}");
-            }, 2500);
-          } 
-          else {
-            window.location.replace("${webUrl}");
-          }
-        });
-      </script>
-    </head>
-    <body>
-      <div class="loader"></div>
-    </body>
-    </html>
-  `;
-
-  return reply.type('text/html').send(html);
+  return reply.send({
+    success: true,
+    data: {
+      contentId,
+      contentType: resolvedContentType,
+      webUrl,
+      androidIntent,
+      iosScheme
+    }
+  });
 };
 
 export const recordShare = async (request: FastifyRequest, reply: FastifyReply) => {
