@@ -44,6 +44,23 @@ export const handleShareRedirect = async (request: FastifyRequest, reply: Fastif
   
   const iosScheme = `${APP_SCHEME}://${resolvedContentType}/${contentId}`;
   const appStoreLink = `https://apps.apple.com/app/id${APP_STORE_ID}`;
+  const webUrl = `${FRONTEND_URL}/${webPath}/${contentId}`;
+
+  const format = (request.query as any).format;
+  const acceptsJson = request.headers.accept?.includes('application/json') || format === 'json';
+
+  if (acceptsJson) {
+    return reply.send({
+      success: true,
+      data: {
+        contentId,
+        contentType: resolvedContentType,
+        webUrl,
+        androidIntent,
+        iosScheme
+      }
+    });
+  }
 
   const html = `
     <!DOCTYPE html>
@@ -71,7 +88,7 @@ export const handleShareRedirect = async (request: FastifyRequest, reply: Fastif
             }, 2500);
           } 
           else {
-            window.location.replace("${FRONTEND_URL}/${webPath}/${contentId}");
+            window.location.replace("${webUrl}");
           }
         });
       </script>
