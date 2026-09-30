@@ -80,7 +80,7 @@ const mapContentItem = (
     likeCount,
     isLikedByUser,
     shares: item.shares || 0,
-    shareUrl: buildShareUrl(item._id.toString()),
+    shareUrl: buildShareUrl(item._id.toString(), item.type === "TVShow" || item.type === "Episode" || item.isSeries ? "show" : "movie"),
     featured: item.featured,
     trending: item.trending,
     isNewContent: item.isNewContent,

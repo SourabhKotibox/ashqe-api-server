@@ -225,7 +225,7 @@ export const getSeriesDetail = async (request: FastifyRequest, reply: FastifyRep
         isWishlisted,
         wishlisted,
         
-        shareUrl: buildShareUrl(series._id.toString()),
+        shareUrl: buildShareUrl(series._id.toString(), "show"),
         
         cast,
         crew,

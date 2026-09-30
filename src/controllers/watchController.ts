@@ -354,7 +354,7 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
           isLikedByUser,
           isWishlisted,
           isDownloaded,
-          shareUrl: buildShareUrl(content._id.toString()),
+          shareUrl: buildShareUrl(content._id.toString(), content.type === "TVShow" || content.type === "Episode" ? "show" : "movie"),
 
           cast,
           crew,

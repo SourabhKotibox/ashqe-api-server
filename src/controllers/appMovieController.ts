@@ -274,7 +274,7 @@ export const getMovieDetail = async (request: FastifyRequest, reply: FastifyRepl
         isDownloaded,
 
         // Share
-        shareUrl: buildShareUrl(movie._id.toString()),
+        shareUrl: buildShareUrl(movie._id.toString(), "movie"),
 
         // People
         cast,

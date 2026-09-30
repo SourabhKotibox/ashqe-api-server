@@ -195,7 +195,7 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
       shares: item.shares || 0,
       views: item.views || 0,
       episodeMeta: `HD • ${genreNames.join(', ')} • ${durationFormatted || 'N/A'}`,
-      shareUrl: buildShareUrl(item._id.toString()),
+      shareUrl: buildShareUrl(item._id.toString(), item.type === "TVShow" || item.type === "Episode" ? "show" : "movie"),
       isExclusive: item.isExclusive || false,
       featured: item.featured || false,
       trending: item.trending || false,

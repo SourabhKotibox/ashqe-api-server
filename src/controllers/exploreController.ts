@@ -72,7 +72,7 @@ const mapContentItem = (
     likeCount,
     isLikedByUser,
     shares: item.shares || 0,
-    shareUrl: buildShareUrl(item._id.toString()),
+    shareUrl: buildShareUrl(item._id.toString(), type === "show" ? "show" : "movie"),
     featured: item.featured,
     trending: item.trending,
     isNewContent: item.isNewContent,
