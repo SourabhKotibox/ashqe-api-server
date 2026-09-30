@@ -143,6 +143,14 @@ export interface ISettings extends Document {
   messageCentralCountryCode: string;
   messageCentralOtpLength: number;
   messageCentralFlowType: string;
+  
+  // App Update Settings
+  appUpdateAndroidVersion: string;
+  appUpdateAndroidUrl: string;
+  appUpdateAndroidForce: boolean;
+  appUpdateIosVersion: string;
+  appUpdateIosUrl: string;
+  appUpdateIosForce: boolean;
 }
 
 const SettingsSchema = new Schema<ISettings>(
@@ -286,6 +294,14 @@ const SettingsSchema = new Schema<ISettings>(
     messageCentralCountryCode: { type: String, default: '91' },
     messageCentralOtpLength: { type: Number, default: 4 },
     messageCentralFlowType: { type: String, default: 'SMS' },
+
+    // App Update
+    appUpdateAndroidVersion: { type: String, default: '' },
+    appUpdateAndroidUrl: { type: String, default: '' },
+    appUpdateAndroidForce: { type: Boolean, default: false },
+    appUpdateIosVersion: { type: String, default: '' },
+    appUpdateIosUrl: { type: String, default: '' },
+    appUpdateIosForce: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

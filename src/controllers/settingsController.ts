@@ -419,3 +419,22 @@ export const testEmail = async (request: FastifyRequest, reply: FastifyReply) =>
     return reply.status(500).send({ success: false, error: error.message });
   }
 };
+
+export const getAppVersion = async (request: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const settings = await getOrCreateSettings();
+    return reply.send({
+      success: true,
+      data: {
+        androidVersion: settings.appUpdateAndroidVersion || "",
+        androidUrl: settings.appUpdateAndroidUrl || "",
+        androidForceUpdate: settings.appUpdateAndroidForce || false,
+        iosVersion: settings.appUpdateIosVersion || "",
+        iosUrl: settings.appUpdateIosUrl || "",
+        iosForceUpdate: settings.appUpdateIosForce || false,
+      }
+    });
+  } catch (error) {
+    return reply.status(500).send({ success: false, error: 'Failed to fetch app version' });
+  }
+};
