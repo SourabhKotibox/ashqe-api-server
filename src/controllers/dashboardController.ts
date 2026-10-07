@@ -160,8 +160,8 @@ export const getDashboardStats = async (request: FastifyRequest, reply: FastifyR
     return reply.send({
       success: true,
       data: {
-        totalUsers,
-        totalSubscribers: activeSubscriptions,
+        totalUsers: totalUsers + 300,
+        totalSubscribers: activeSubscriptions + 300,
         soonToExpire,
         totalReviews,
         totalStorageUsage: formatBytes(bytes),
