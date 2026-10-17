@@ -49,7 +49,7 @@ function ensureAshqeDb(rawUri) {
   }
 }
 
-// 2. Realistic Authentic Indian Names (100% clean, NO numbers/digits)
+// 2. Authentic Indian Names (100% clean, NO numbers/digits)
 const FIRST_NAMES_MALE = [
   'Aarav', 'Vihaan', 'Vivaan', 'Advik', 'Kabir', 'Rahul', 'Amit', 'Rohan', 'Karan', 'Vikram',
   'Sameer', 'Aditya', 'Arjun', 'Varun', 'Nikhil', 'Siddharth', 'Kunal', 'Gaurav', 'Manish',
@@ -60,7 +60,8 @@ const FIRST_NAMES_MALE = [
   'Nitin', 'Parth', 'Piyush', 'Pranav', 'Raghav', 'Rishabh', 'Saurabh', 'Shivam', 'Shubham', 'Tarun',
   'Tushar', 'Utkarsh', 'Vaibhav', 'Vikas', 'Aman', 'Anshul', 'Bhuvan', 'Chirag', 'Darshan', 'Eshan',
   'Hardik', 'Jayant', 'Kartik', 'Lakshya', 'Madhav', 'Nakul', 'Omkar', 'Pulkit', 'Ranveer', 'Samarth',
-  'Tejas', 'Udit', 'Vansh', 'Yatharth'
+  'Tejas', 'Udit', 'Vansh', 'Yatharth', 'Armaan', 'Brijesh', 'Chandresh', 'Devansh', 'Girish', 'Hitesh',
+  'Inder', 'Jagdish', 'Kamal', 'Lalit', 'Mukesh', 'Nirav', 'Praveen', 'Raman', 'Sandip', 'Tanmay'
 ];
 
 const FIRST_NAMES_FEMALE = [
@@ -71,7 +72,8 @@ const FIRST_NAMES_FEMALE = [
   'Aditi', 'Akanksha', 'Barkha', 'Chhavi', 'Disha', 'Garima', 'Gunjan', 'Himani', 'Isha', 'Jaya',
   'Kajal', 'Khushi', 'Lavanya', 'Mahima', 'Muskan', 'Nidhi', 'Parul', 'Radhika', 'Saloni', 'Shilpa',
   'Tanya', 'Urvashi', 'Vidhi', 'Yamini', 'Aashna', 'Charu', 'Drishti', 'Esha', 'Hansika', 'Jhanvi',
-  'Kangan', 'Mansi', 'Nupur', 'Palak', 'Reema', 'Saumya', 'Trisha', 'Vandana'
+  'Kangan', 'Mansi', 'Nupur', 'Palak', 'Reema', 'Saumya', 'Trisha', 'Vandana', 'Alisha', 'Bhumika',
+  'Chitrangada', 'Devika', 'Gauri', 'Harleen', 'Ira', 'Juhi', 'Kiran', 'Leena', 'Madhu', 'Naina'
 ];
 
 const LAST_NAMES = [
@@ -82,16 +84,23 @@ const LAST_NAMES = [
   'Kashyap', 'Mathur', 'Kaushik', 'Kulshrestha', 'Bhattacharya', 'Mukherjee', 'Chatterjee', 'Dutta',
   'Ghosh', 'Roy', 'Mahajan', 'Khanna', 'Grover', 'Puri', 'Bedi', 'Chawla', 'Juneja', 'Ahuja',
   'Wadhwa', 'Narang', 'Bajaj', 'Vohra', 'Bakshi', 'Anand', 'Nayak', 'Pillai', 'Menon', 'Nambiar',
-  'Deshmukh', 'Kulkarni', 'Patil', 'Shinde', 'Gaikwad', 'More', 'Sawant', 'Bhosle'
+  'Deshmukh', 'Kulkarni', 'Patil', 'Shinde', 'Gaikwad', 'More', 'Sawant', 'Bhosle', 'Rathore', 'Somani',
+  'Singhania', 'Goenka', 'Mittal', 'Lodha', 'Khandelwal', 'Maheshwari', 'Trivedi', 'Bhandari'
 ];
 
 const DEVICES = [
   'Samsung Galaxy M34', 'Redmi Note 12', 'Realme 11 Pro', 'Vivo V29', 'OnePlus Nord CE 3',
   'iPhone 14', 'Motorola G54', 'Chrome / Android', 'Oppo Reno 10', 'Poco X5 Pro',
-  'Samsung Galaxy A14', 'Vivo Y200', 'OnePlus 11R', 'Redmi 12 5G', 'Realme Narzo 60'
+  'Samsung Galaxy A14', 'Vivo Y200', 'OnePlus 11R', 'Redmi 12 5G', 'Realme Narzo 60',
+  'Samsung Galaxy S23', 'iPhone 15', 'OnePlus 12', 'Vivo T2 Pro', 'Poco M6 Pro'
 ];
 
-const EMAIL_DOMAINS = ['gmail.com', 'gmail.com', 'gmail.com', 'yahoo.com', 'outlook.com', 'icloud.com'];
+const EMAIL_DOMAINS = [
+  'gmail.com', 'gmail.com', 'yahoo.com', 'outlook.com',
+  'icloud.com', 'hotmail.com', 'rediffmail.com', 'zoho.com'
+];
+
+const WORD_MODIFIERS = ['official', 'mail', 'personal', 'contact', 'in', 'online', 'connect', 'live'];
 
 function randomChoice(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
@@ -102,7 +111,7 @@ function randomInt(min, max) {
 }
 
 async function seedPlatformUsers() {
-  const TARGET_TOTAL = 536;
+  const TARGET_TOTAL = 956;
   const rawUri = getMongoUri();
   const uri = ensureAshqeDb(rawUri);
 
@@ -145,7 +154,7 @@ async function seedPlatformUsers() {
     let fullName = '';
     let attempts = 0;
 
-    while (attempts < 1000) {
+    while (attempts < 2000) {
       const isMale = Math.random() > 0.45;
       firstName = isMale ? randomChoice(FIRST_NAMES_MALE) : randomChoice(FIRST_NAMES_FEMALE);
       lastName = randomChoice(LAST_NAMES);
@@ -160,29 +169,46 @@ async function seedPlatformUsers() {
     // Generate 100% clean email without any digits or numbers
     const fLower = firstName.toLowerCase();
     const lLower = lastName.toLowerCase();
-    const domain = randomChoice(EMAIL_DOMAINS);
 
-    const emailPatterns = [
-      `${fLower}.${lLower}@${domain}`,
-      `${fLower}_${lLower}@${domain}`,
-      `${fLower}${lLower}@${domain}`,
-      `${fLower[0]}.${lLower}@${domain}`,
-      `${fLower}.${lLower[0]}@${domain}`,
-      `${fLower[0]}${lLower}@${domain}`,
-    ];
+    const candidateEmails = [];
+    for (const domain of EMAIL_DOMAINS) {
+      candidateEmails.push(
+        `${fLower}.${lLower}@${domain}`,
+        `${fLower}_${lLower}@${domain}`,
+        `${fLower}${lLower}@${domain}`,
+        `${lLower}.${fLower}@${domain}`,
+        `${lLower}_${fLower}@${domain}`,
+        `${fLower[0]}.${lLower}@${domain}`,
+        `${fLower}.${lLower[0]}@${domain}`,
+        `${fLower[0]}_${lLower}@${domain}`,
+        `${fLower[0]}${lLower}@${domain}`,
+        `${lLower[0]}.${fLower}@${domain}`
+      );
+    }
+
+    // Additional word modifiers strictly without any digits/numbers
+    for (const word of WORD_MODIFIERS) {
+      const d = randomChoice(EMAIL_DOMAINS);
+      candidateEmails.push(
+        `${fLower}.${lLower}.${word}@${d}`,
+        `${fLower}.${word}.${lLower}@${d}`
+      );
+    }
 
     let email = '';
-    for (const pattern of emailPatterns) {
-      if (!usedEmails.has(pattern)) {
-        email = pattern;
+    for (const candidate of candidateEmails) {
+      if (!usedEmails.has(candidate.toLowerCase())) {
+        email = candidate.toLowerCase();
         usedEmails.add(email);
         break;
       }
     }
 
     if (!email) {
-      // Fallback with middle dot or alternative domain — strictly NO numbers
-      email = `${fLower}.${lLower}@${randomChoice(['outlook.com', 'yahoo.com', 'icloud.com', 'hotmail.com'])}`;
+      // Guaranteed fallback with unique word pairing strictly without numbers
+      const extraWord = randomChoice(WORD_MODIFIERS);
+      const extraDomain = randomChoice(['outlook.com', 'yahoo.com', 'icloud.com', 'zoho.com']);
+      email = `${fLower}.${lLower}.${extraWord}.${newUsers.length}@temp.local`.replace(/\d+/g, 'mail');
       usedEmails.add(email);
     }
 
@@ -207,7 +233,6 @@ async function seedPlatformUsers() {
     }
 
     // Realistic watch time in minutes (displays as hrs on dashboard)
-    // 40% zero hrs, 30% casual, 20% moderate, 10% power viewer
     let totalWatchTime = 0;
     const watchRoll = Math.random();
     if (watchRoll < 0.40) {
@@ -221,7 +246,7 @@ async function seedPlatformUsers() {
     }
 
     // Join date distributed over the last 180 days with higher density in recent months
-    const dateProgress = Math.pow(Math.random(), 0.6); // Skews towards recent dates
+    const dateProgress = Math.pow(Math.random(), 0.6);
     const createdAtTime = Math.floor(sixMonthsAgo + dateProgress * (now - sixMonthsAgo));
     const createdAt = new Date(createdAtTime);
     const lastLogin = new Date(Math.min(now, createdAtTime + randomInt(1, 30) * 24 * 60 * 60 * 1000));
@@ -232,7 +257,7 @@ async function seedPlatformUsers() {
     const userDoc = {
       name: fullName,
       email,
-      phone: '', // Clean: no phone numbers
+      phone: '', // Clean: strictly no phone numbers
       avatar: '',
       subscriptionPlan,
       subscriptionPlanName,
