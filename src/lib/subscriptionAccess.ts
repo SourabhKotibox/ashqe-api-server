@@ -87,14 +87,30 @@ export async function resolveEffectiveUserPlan(
     .lean();
 
   if (liveSub) {
-    const planKey = normalizePlan(liveSub.plan);
+    let planKey = normalizePlan(liveSub.plan);
+
+    // If liveSub points to a SubscriptionPlan, check its configured level (1, 2, 3)
+    if (liveSub.planId) {
+      try {
+        const { SubscriptionPlanModel } = await import('../models/SubscriptionPlan');
+        const planDoc = await SubscriptionPlanModel.findById(liveSub.planId).lean();
+        if (planDoc && typeof planDoc.level === 'number') {
+          if (planDoc.level >= 3) planKey = 'premium';
+          else if (planDoc.level === 2 && planKey === 'free') planKey = 'standard';
+          else if (planDoc.level === 1 && planKey === 'free') planKey = 'basic';
+        }
+      } catch {
+        // Fallback to name-based normalization
+      }
+    }
+
     if (planKey === 'free') return 'free';
 
     // Keep User document in sync with the live subscription row
     try {
       await UserModel.findByIdAndUpdate(oid, {
         $set: {
-          subscriptionPlan: liveSub.plan || planKey,
+          subscriptionPlan: planKey,
           subscriptionStatus: 'active',
           subscriptionExpiry: liveSub.endDate || null,
           subscriptionPlanId: liveSub.planId || null,
@@ -105,7 +121,7 @@ export async function resolveEffectiveUserPlan(
       // Non-fatal — still return the live plan for this request
     }
 
-    return liveSub.plan || planKey;
+    return planKey;
   }
 
   // No live Subscription row — use User fields (legacy / admin-set)

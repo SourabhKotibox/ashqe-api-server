@@ -8,6 +8,8 @@ import { UserWishlistModel } from '../models/UserWishlist';
 import { logger } from '../lib/logger';
 import { buildShareUrl } from '../lib/config';
 import { isS3Configured, getS3PublicUrl } from '../lib/s3';
+import { extractOptionalUser } from '../lib/jwtHelper';
+import { resolveEffectiveUserPlan } from '../lib/subscriptionAccess';
 
 // Helper to convert relative URLs to absolute URLs
 const toAbsoluteUrl = (
@@ -39,21 +41,11 @@ const toAbsoluteUrl = (
 
 // Helper: try to extract userId and plan from JWT without throwing
 const getOptionalUser = async (request: FastifyRequest): Promise<{ userId: string; userPlan: string } | null> => {
-  try {
-    const authHeader = request.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) return null;
-    const server = request.server as any;
-    const decoded = server.jwt.verify(authHeader.slice(7)) as any;
-    if (!decoded?.id) return null;
+  const user = extractOptionalUser(request);
+  if (!user?.userId) return null;
 
-    const user = await UserModel.findById(decoded.id).select('subscriptionPlan subscriptionStatus subscriptionExpiry').lean();
-    if (!user) return { userId: decoded.id, userPlan: 'free' };
-
-    const isActive = user.subscriptionStatus === 'active' && (!user.subscriptionExpiry || user.subscriptionExpiry > new Date());
-    return { userId: decoded.id, userPlan: isActive ? (user.subscriptionPlan || 'free') : 'free' };
-  } catch {
-    return null;
-  }
+  const userPlan = await resolveEffectiveUserPlan(user.userId);
+  return { userId: user.userId, userPlan };
 };
 
 export const getSeriesDetail = async (request: FastifyRequest, reply: FastifyReply) => {

@@ -12,17 +12,10 @@ import {
 } from '../lib/subscriptionAccess';
 
 // Helper: try to extract userId from JWT (optional auth)
+import { extractOptionalUser } from '../lib/jwtHelper';
+
 const getOptionalUserId = (request: FastifyRequest): string | null => {
-  try {
-    const authHeader = request.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-    const token = authHeader.slice(7);
-    const server = request.server as any;
-    const decoded = server.jwt.verify(token) as any;
-    return decoded?.id || null;
-  } catch {
-    return null;
-  }
+  return extractOptionalUser(request)?.userId || null;
 };
 
 // Unified item mapper
@@ -171,7 +164,7 @@ export const getSearchPage = async (request: FastifyRequest, reply: FastifyReply
     ];
     if (genreIds.length > 0) queryOptions.push({ genres: { $in: genreIds } });
 
-    const baseFilter = {
+    const baseFilter: any = {
       status: 'published',
       ...(targetLanguageId ? { languages: targetLanguageId } : {}),
       $or: queryOptions
@@ -181,8 +174,8 @@ export const getSearchPage = async (request: FastifyRequest, reply: FastifyReply
     const isShowSearch = /show|series/i.test(searchTerm);
 
     // If explicit type is searched, match any item of that type
-    const movieFilter = isMovieSearch ? { ...baseFilter, $or: [{}] } : baseFilter;
-    const showFilter = isShowSearch ? { ...baseFilter, $or: [{}] } : baseFilter;
+    const movieFilter: any = isMovieSearch ? { ...baseFilter, $or: [{}] } : baseFilter;
+    const showFilter: any = isShowSearch ? { ...baseFilter, $or: [{}] } : baseFilter;
 
     let matchedMovies: any[] = [];
     let matchedShows: any[] = [];

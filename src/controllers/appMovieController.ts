@@ -33,20 +33,15 @@ const toAbsoluteUrl = (
   return `${baseUrl}${relPath}`;
 };
 
+import { extractOptionalUser } from '../lib/jwtHelper';
+
 // Helper: try to extract userId and plan from JWT without throwing
 const getOptionalUser = async (request: FastifyRequest): Promise<{ userId: string; userPlan: string } | null> => {
-  try {
-    const authHeader = request.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) return null;
-    const server = request.server as any;
-    const decoded = server.jwt.verify(authHeader.slice(7)) as any;
-    if (!decoded?.id) return null;
+  const user = extractOptionalUser(request);
+  if (!user?.userId) return null;
 
-    const userPlan = await resolveEffectiveUserPlan(decoded.id);
-    return { userId: decoded.id, userPlan };
-  } catch {
-    return null;
-  }
+  const userPlan = await resolveEffectiveUserPlan(user.userId);
+  return { userId: user.userId, userPlan };
 };
 
 // ── GET /api/app/movies/:id ────────────────────────────────────────────────────

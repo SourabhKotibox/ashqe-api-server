@@ -187,7 +187,7 @@ export const editAppSetting = async (request: FastifyRequest, reply: FastifyRepl
 export const getHomeTabs = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const appSetting = await AppSettingModel.findOne({ key: 'home-tabs-config' });
-    let tabs = appSetting?.value || [
+    let tabs: any[] = appSetting?.value || [
       { id: 'movie', name: 'Movies' },
       { id: 'webseries', name: 'Web Series' }
     ];

@@ -453,11 +453,22 @@ export const createRazorpayOrder = async (request: FastifyRequest, reply: Fastif
         planId: payload.planId,
       });
 
+      const server = request.server as any;
+      const user = await UserModel.findById(userId).lean();
+      const accessToken = server?.jwt?.sign
+        ? server.jwt.sign(
+            { id: String(userId), name: user?.name, role: 'user' },
+            { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '365d' }
+          )
+        : undefined;
+
       return reply.send({
         success: true,
         isFree: true,
         message: 'Free plan activated successfully',
-        subscriptionId: subscription._id
+        subscriptionId: subscription._id,
+        accessToken,
+        expiresIn: 31536000,
       });
     }
 
@@ -545,6 +556,15 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
       planId: payload.planId,
     });
 
+    const server = request.server as any;
+    const user = await UserModel.findById(sanitizedUserId).lean();
+    const accessToken = server?.jwt?.sign
+      ? server.jwt.sign(
+          { id: sanitizedUserId, name: user?.name, role: 'user' },
+          { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '365d' }
+        )
+      : undefined;
+
     return reply.send({
       success: true,
       subscription: true,
@@ -554,6 +574,8 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
       subscriptionPlanName: payload.plan || null,
       subscriptionStatus: 'active',
       subscriptionExpiry: payload.endDate,
+      accessToken,
+      expiresIn: 31536000,
     });
   } catch (error: any) {
     console.error('Razorpay Verify Error:', error);

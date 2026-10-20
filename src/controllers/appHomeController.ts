@@ -36,19 +36,13 @@ const buildUrlResolver = (request: FastifyRequest) =>
     return `${request.protocol}://${request.hostname}${relPath}`;
   };
 
+import { extractOptionalUser } from '../lib/jwtHelper';
+
 // Helper: try to extract userId from JWT (optional auth — no error if missing/invalid)
 const getAuthData = (request: FastifyRequest): { userId: string | null; profileId: string | null } => {
-  let userId = null;
-  let profileId = (request.headers['x-profile-id'] as string) || null;
-  try {
-    const authHeader = request.headers.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-      const server = request.server as any;
-      const decoded = server.jwt.verify(authHeader.slice(7)) as any;
-      userId = decoded?.id || null;
-    }
-  } catch {}
-  return { userId, profileId };
+  const user = extractOptionalUser(request);
+  const profileId = (request.headers['x-profile-id'] as string) || null;
+  return { userId: user?.userId || null, profileId };
 };
 
 // Helper function to map movie items — resolveUrl converts all image/video paths to full URLs
@@ -516,7 +510,7 @@ export const getAppBanners = async (request: FastifyRequest, reply: FastifyReply
     // Build URL resolver (local storage)
     const resolveUrl = buildUrlResolver(request);
 
-    let contentTypes = ['movie', 'tvShow'];
+    let contentTypes: ('movie' | 'tvShow')[] = ['movie', 'tvShow'];
     if (requestedTab === 'movie') contentTypes = ['movie'];
     else if (requestedTab === 'webseries' || requestedTab === 'tvshow') contentTypes = ['tvShow'];
 

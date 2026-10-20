@@ -18,21 +18,15 @@ import {
 } from '../lib/subscriptionAccess';
 
 import { buildShareUrl } from '../lib/config';
+import { extractOptionalUser } from '../lib/jwtHelper';
 
 const getOptionalUser = async (request: FastifyRequest): Promise<{ userId: string; userPlan: string; profileId?: string } | null> => {
-  try {
-    const authHeader = request.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) return null;
-    const server = request.server as any;
-    const decoded = server.jwt.verify(authHeader.slice(7)) as any;
-    if (!decoded?.id) return null;
+  const user = extractOptionalUser(request);
+  if (!user?.userId) return null;
 
-    const profileId = request.headers['x-profile-id'] as string | undefined;
-    const userPlan = await resolveEffectiveUserPlan(decoded.id);
-    return { userId: decoded.id, userPlan, profileId };
-  } catch {
-    return null;
-  }
+  const profileId = (request.headers['x-profile-id'] as string | undefined) || undefined;
+  const userPlan = await resolveEffectiveUserPlan(user.userId);
+  return { userId: user.userId, userPlan, profileId };
 };
 
 // Helper to convert relative URLs to absolute URLs (local storage)
@@ -207,7 +201,7 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
       const synced = await autoDetectAndSyncQualities(playbackTarget._id, playbackType);
       if (synced) playbackTarget = synced;
       else {
-        const Model = playbackType === 'episode' ? EpisodeModel : playbackType === 'tvShow' ? TVShowModel : MovieModel;
+        const Model: any = playbackType === 'episode' ? EpisodeModel : playbackType === 'tvShow' ? TVShowModel : MovieModel;
         const refreshed = await Model.findById(playbackTarget._id).lean();
         if (refreshed) playbackTarget = refreshed;
       }
@@ -250,7 +244,7 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
     // ── Fetch Related Content ─────────────────────────────────────────────
     let relatedContents: any[] = [];
     if (content.genres && content.genres.length > 0) {
-      const RelatedModel = isSeries ? TVShowModel : MovieModel;
+      const RelatedModel: any = isSeries ? TVShowModel : MovieModel;
       const related = await RelatedModel.find({
         _id: { $ne: content._id },
         status: 'published',

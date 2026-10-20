@@ -12,20 +12,13 @@ import {
 } from '../lib/subscriptionAccess';
 
 // How many extra items to fetch per page to survive deduplication filtering
+import { extractOptionalUser } from '../lib/jwtHelper';
+
 const FETCH_MULTIPLIER = 4;
 
 // Helper: try to extract userId from JWT (optional auth — no error if missing/invalid)
 const getOptionalUserId = (request: FastifyRequest): string | null => {
-  try {
-    const authHeader = request.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-    const token = authHeader.slice(7);
-    const server = request.server as any;
-    const decoded = server.jwt.verify(token) as any;
-    return decoded?.id || null;
-  } catch {
-    return null;
-  }
+  return extractOptionalUser(request)?.userId || null;
 };
 
 import { buildShareUrl } from '../lib/config';

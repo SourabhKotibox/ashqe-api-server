@@ -20,6 +20,7 @@ import { TransactionModel } from '../models/Transaction';
 import { logger } from '../lib/logger';
 import uploadHandler from '../lib/uploadHandler';
 import { resolveEffectiveUserPlan } from '../lib/subscriptionAccess';
+import { extractOptionalUser } from '../lib/jwtHelper';
 
 // Optional user lookup helper
 const getOptionalUserToken = (request: FastifyRequest): string | null => {
@@ -33,15 +34,8 @@ const getOptionalUserToken = (request: FastifyRequest): string | null => {
 };
 
 const getOptionalUserId = (request: FastifyRequest): string | null => {
-  try {
-    const token = getOptionalUserToken(request);
-    if (!token) return null;
-    const server = request.server as any;
-    const decoded = server.jwt.verify(token) as any;
-    return decoded?.id || null;
-  } catch {
-    return null;
-  }
+  const user = extractOptionalUser(request);
+  return user?.userId || null;
 };
 
 // ── GET Profile & Settings ──────────────────────────────────────────────────
@@ -64,20 +58,12 @@ export const getAppProfile = async (request: FastifyRequest, reply: FastifyReply
 
       if (user) {
         // Verify device ID if present in token
-        const token = getOptionalUserToken(request);
-        if (token) {
-          try {
-            const server = request.server as any;
-            const decoded = server.jwt.verify(token) as any;
-            if (decoded.deviceId && decoded.deviceId !== 'unknown') {
-              const deviceExists = (user as any).devices?.some((d: any) => d.deviceId === decoded.deviceId);
-              // Do not kick web/OTP sessions just because device list is empty after account merge
-              if (!deviceExists && Array.isArray((user as any).devices) && (user as any).devices.length > 0) {
-                return reply.status(401).send({ success: false, message: 'Device was removed, please login again.' });
-              }
-            }
-          } catch (e) {
-            // ignore jwt error here, it was already handled or we fallback to guest
+        const tokenUser = extractOptionalUser(request);
+        if (tokenUser?.deviceId && tokenUser.deviceId !== 'unknown') {
+          const deviceExists = (user as any).devices?.some((d: any) => d.deviceId === tokenUser.deviceId);
+          // Do not kick web/OTP sessions just because device list is empty after account merge
+          if (!deviceExists && Array.isArray((user as any).devices) && (user as any).devices.length > 0) {
+            return reply.status(401).send({ success: false, message: 'Device was removed, please login again.' });
           }
         }
       }
@@ -710,7 +696,7 @@ export const updateAppProfile = async (request: FastifyRequest, reply: FastifyRe
             role: 'user',
             deviceId: 'unknown',
           },
-          { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '7d' }
+          { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '365d' }
         );
 
         const planOut = String((existing as any).subscriptionPlan || 'free').toLowerCase();

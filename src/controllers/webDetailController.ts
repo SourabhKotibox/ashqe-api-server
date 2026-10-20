@@ -10,18 +10,12 @@ import {
   resolveEffectiveUserPlan,
 } from '../lib/subscriptionAccess';
 import { QUALITY_PLAN_GATE } from './watchController';
+import { extractOptionalUser } from '../lib/jwtHelper';
 
 const getOptionalUserPlan = async (request: FastifyRequest): Promise<string> => {
-  try {
-    const authHeader = request.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) return 'free';
-    const server = request.server as any;
-    const decoded = server.jwt.verify(authHeader.slice(7)) as any;
-    if (!decoded?.id) return 'free';
-    return await resolveEffectiveUserPlan(decoded.id);
-  } catch {
-    return 'free';
-  }
+  const user = extractOptionalUser(request);
+  if (!user?.userId) return 'free';
+  return await resolveEffectiveUserPlan(user.userId);
 };
 
 export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -206,7 +200,7 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
     let related: any[] = [];
     if (item.genres && item.genres.length > 0) {
       const primaryGenreId = item.genres[0]._id;
-      const RelatedModel = isSeries ? (await import('../models/TVShow')).TVShowModel : MovieModel;
+      const RelatedModel: any = isSeries ? (await import('../models/TVShow')).TVShowModel : MovieModel;
       const relatedRaw = await RelatedModel.find({ genres: primaryGenreId, _id: { $ne: item._id }, status: 'published' })
         .sort({ views: -1 })
         .limit(5)
@@ -260,8 +254,8 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
           durationFormatted: durStr,
           isFree: ep.isFree,
           isLocked: !ep.isFree && isContentLocked(contentPlan, userPlan),
-          videoUrl: contentAccessible ? (ep.hlsUrl || ep.sourceVideoUrl || ep.videoUrl || null) : null,
-          hlsUrl: contentAccessible ? (ep.hlsUrl || ep.sourceVideoUrl || ep.videoUrl || null) : null,
+          videoUrl: contentAccessible ? (ep.hlsUrl || ep.sourceVideoUrl || (ep as any).videoUrl || null) : null,
+          hlsUrl: contentAccessible ? (ep.hlsUrl || ep.sourceVideoUrl || (ep as any).videoUrl || null) : null,
           sourceVideoUrl: contentAccessible ? (ep.sourceVideoUrl || null) : null,
         };
         seasonsMap.get(ep.season)!.push(mappedEp);

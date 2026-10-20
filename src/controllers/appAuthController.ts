@@ -317,7 +317,7 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
       deviceId: deviceId || 'unknown',
     };
     const accessToken = server.jwt.sign(tokenPayload, {
-      expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '7d',
+      expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '365d',
     });
 
     const sub = await resolveSubscriptionPayload(userDoc);
@@ -336,7 +336,7 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
       walletBalance: (userDoc as any).walletBalance || 0,
       profileLimitCount: (userDoc as any).profileLimitCount || 1,
       isNewUser: allUsersWithPhone.length === 0,
-      expiresIn: 604800,
+      expiresIn: 31536000,
     });
   } catch (error) {
     console.error('Error verifying OTP:', error);
@@ -464,8 +464,8 @@ export const registerUser = async (request: FastifyRequest, reply: FastifyReply)
         if (!appUser.name || appUser.name === phone) appUser.name = name;
         await appUser.save();
         const server = request.server as any;
-        const accessToken = server.jwt.sign({ id: appUser._id.toString(), name: appUser.name, role: 'user' }, { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '7d' });
-        return reply.status(200).send({ success: true, accessToken, userId: appUser._id.toString(), name: appUser.name, avatar: appUser.avatar || null, subscriptionPlan: appUser.subscriptionPlanName || appUser.subscriptionPlan || 'free', subscriptionPlanName: appUser.subscriptionPlanName || null, subscriptionStatus: appUser.subscriptionStatus || 'inactive', expiresIn: 604800, linked: true });
+        const accessToken = server.jwt.sign({ id: appUser._id.toString(), name: appUser.name, role: 'user' }, { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '365d' });
+        return reply.status(200).send({ success: true, accessToken, userId: appUser._id.toString(), name: appUser.name, avatar: appUser.avatar || null, subscriptionPlan: appUser.subscriptionPlanName || appUser.subscriptionPlan || 'free', subscriptionPlanName: appUser.subscriptionPlanName || null, subscriptionStatus: appUser.subscriptionStatus || 'inactive', expiresIn: 31536000, linked: true });
       }
     }
 
@@ -483,8 +483,8 @@ export const registerUser = async (request: FastifyRequest, reply: FastifyReply)
     }).catch((err) => console.error('[email] Registration email failed:', err));
 
     const server = request.server as any;
-    const accessToken = server.jwt.sign({ id: user._id.toString(), name: user.name, role: 'user' }, { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '7d' });
-    return reply.status(200).send({ success: true, accessToken, userId: user._id.toString(), name: user.name, avatar: user.avatar || null, subscriptionPlan: user.subscriptionPlanName || user.subscriptionPlan || 'free', subscriptionPlanName: user.subscriptionPlanName || null, subscriptionStatus: user.subscriptionStatus || 'inactive', expiresIn: 604800 });
+    const accessToken = server.jwt.sign({ id: user._id.toString(), name: user.name, role: 'user' }, { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '365d' });
+    return reply.status(200).send({ success: true, accessToken, userId: user._id.toString(), name: user.name, avatar: user.avatar || null, subscriptionPlan: user.subscriptionPlanName || user.subscriptionPlan || 'free', subscriptionPlanName: user.subscriptionPlanName || null, subscriptionStatus: user.subscriptionStatus || 'inactive', expiresIn: 31536000 });
   } catch (error) {
     console.error('Register Error:', error);
     return reply.status(500).send({ success: false, message: 'Internal server error' });
@@ -532,7 +532,7 @@ export const loginUser = async (request: FastifyRequest, reply: FastifyReply) =>
     user.loginCount += 1;
     await user.save();
     const server = request.server as any;
-    const accessToken = server.jwt.sign({ id: user._id.toString(), name: user.name, role: 'user' }, { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '7d' });
+    const accessToken = server.jwt.sign({ id: user._id.toString(), name: user.name, role: 'user' }, { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '365d' });
     const sub = await resolveSubscriptionPayload(user);
     return reply.status(200).send({
       success: true,
@@ -545,7 +545,7 @@ export const loginUser = async (request: FastifyRequest, reply: FastifyReply) =>
       ...sub,
       walletBalance: user.walletBalance || 0,
       profileLimitCount: (user as any).profileLimitCount || 1,
-      expiresIn: 604800,
+      expiresIn: 31536000,
     });
 
   } catch (error) {
@@ -559,7 +559,7 @@ function signUserToken(request: FastifyRequest, user: any, deviceId?: string) {
   const server = request.server as any;
   return server.jwt.sign(
     { id: user._id.toString(), name: user.name, role: 'user', deviceId: deviceId || 'unknown' },
-    { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '7d' }
+    { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '365d' }
   );
 }
 
@@ -613,7 +613,7 @@ export const googleAuth = async (request: FastifyRequest, reply: FastifyReply) =
     const user = await findOrCreateSocialUser(payload.email, payload.name || payload.email.split('@')[0], 'google');
     const accessToken = signUserToken(request, user);
     const sub = await resolveSubscriptionPayload(user); // Resolve real plan name from live Subscription row
-    return reply.send({ success: true, accessToken, userId: user._id.toString(), name: user.name, avatar: user.avatar || null, ...sub, expiresIn: 604800 });
+    return reply.send({ success: true, accessToken, userId: user._id.toString(), name: user.name, avatar: user.avatar || null, ...sub, expiresIn: 31536000 });
   } catch (error) {
     console.error('Google Auth Error:', error);
     return reply.status(500).send({ success: false, message: 'Google authentication failed' });
@@ -673,7 +673,7 @@ export const appleAuth = async (request: FastifyRequest, reply: FastifyReply) =>
     const user = await findOrCreateSocialUser(email, name, 'apple');
     const accessToken = signUserToken(request, user);
     const sub = await resolveSubscriptionPayload(user); // Resolve real plan name from live Subscription row
-    return reply.send({ success: true, accessToken, userId: user._id.toString(), name: user.name, avatar: user.avatar || null, ...sub, expiresIn: 604800 });
+    return reply.send({ success: true, accessToken, userId: user._id.toString(), name: user.name, avatar: user.avatar || null, ...sub, expiresIn: 31536000 });
   } catch (error) {
     console.error('Apple Auth Error:', error);
     return reply.status(500).send({ success: false, message: 'Apple authentication failed' });
