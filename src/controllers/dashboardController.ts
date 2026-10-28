@@ -60,6 +60,7 @@ export const getDashboardStats = async (request: FastifyRequest, reply: FastifyR
 
     const [
       totalUsers,
+      totalRegistrations,
       activeSubscriptions,
       totalMovies,
       totalTVShows,
@@ -78,6 +79,7 @@ export const getDashboardStats = async (request: FastifyRequest, reply: FastifyR
       adStats,
     ] = await Promise.all([
       UserModel.countDocuments(),
+      UserModel.countDocuments({ createdAt: dateFilter }),
       SubscriptionModel.countDocuments({ status: 'active' }),
       MovieModel.countDocuments(),
       TVShowModel.countDocuments(),
@@ -161,6 +163,7 @@ export const getDashboardStats = async (request: FastifyRequest, reply: FastifyR
       success: true,
       data: {
         totalUsers,
+        totalRegistrations,
         totalSubscribers: activeSubscriptions,
         soonToExpire,
         totalReviews,
