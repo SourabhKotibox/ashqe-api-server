@@ -2,6 +2,7 @@ import { adminAuditPlugin } from '../middlewares/adminAuditPlugin';
 import mongoose, { Schema, Document } from 'mongoose';
 
 export interface IModulePermissions {
+  users: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
   movies: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
   tvShows: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
   genres: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
@@ -43,6 +44,7 @@ export interface IAdminUser extends Document {
 }
 
 const defaultModulePermissions: IModulePermissions = {
+  users: { canView: false, canCreate: false, canEdit: false, canDelete: false },
   movies: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   tvShows: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   genres: { canView: true, canCreate: false, canEdit: false, canDelete: false },
@@ -80,6 +82,7 @@ const AdminUserSchema = new Schema<IAdminUser>(
     phone: String,
     modulePermissions: {
       type: {
+        users: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
         movies: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
         tvShows: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
         genres: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
