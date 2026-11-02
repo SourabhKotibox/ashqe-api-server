@@ -1,4 +1,5 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { attachReferral } from '../lib/partnerCommission';
 import { z } from 'zod';
 import { UserModel } from '../models/User';
 import { SubscriptionPlanModel } from '../models/SubscriptionPlan';
@@ -476,6 +477,12 @@ export const registerUser = async (request: FastifyRequest, reply: FastifyReply)
     const newProfile = { name, isKids: false, maturityLevel: 18, language: 'Hindi' };
     const user = new UserModel({ email, passwordHash, name, phone: phone || undefined, profiles: [newProfile], preferredLanguage: 'Hindi', languageSelectionSkipped: false });
     await user.save();
+
+    // Partner program: optional referral code at signup (never blocks registration)
+    const referralCode = (request.body as any)?.referralCode;
+    if (referralCode) {
+      attachReferral(user._id.toString(), String(referralCode), 'signup_code').catch((e) => console.error('[partner] referral attach failed', e));
+    }
 
     sendTemplateEmail('Registration', email, {
       user_name: name,

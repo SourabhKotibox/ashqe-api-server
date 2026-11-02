@@ -400,6 +400,7 @@ export const bulkDeleteSubscriptions = async (request: FastifyRequest, reply: Fa
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { SettingsModel } from '../models/Settings';
+import { recordCommissionForPayment } from '../lib/partnerCommission';
 
 export const createRazorpayOrder = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
@@ -555,6 +556,22 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
       endDate: payload.endDate,
       planId: payload.planId,
     });
+
+    // Partner program: credit the referring partner (idempotent per Razorpay payment id).
+    // Never block subscription activation on a commission error.
+    try {
+      await recordCommissionForPayment({
+        userId: sanitizedUserId,
+        paymentId: String(razorpay_payment_id),
+        orderId: String(razorpay_order_id),
+        subscriptionId: String(subscription._id),
+        planName: payload.plan,
+        saleAmount: Number(payload.totalAmount) || 0,
+        tax: Number(payload.tax) || 0,
+      });
+    } catch (commissionErr) {
+      console.error('[partner] commission record failed:', commissionErr);
+    }
 
     const server = request.server as any;
     const user = await UserModel.findById(sanitizedUserId).lean();

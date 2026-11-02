@@ -52,6 +52,7 @@ import adRoutes from './ad';
 import adminNotificationsRoutes from './adminNotifications';
 import reviewRoutes from './review';
 import viewsRoutes from './views';
+import partnerRoutes from './partners';
 
 const router: FastifyPluginAsync = async (fastify) => {
   // Android App Links assetlinks.json - serve with correct Content-Type (register first to avoid conflicts)
@@ -112,6 +113,9 @@ const router: FastifyPluginAsync = async (fastify) => {
   fastify.register(sectionsRoutes, { prefix: '/sections' });
   fastify.register(countriesRoutes, { prefix: '/countries' });
   fastify.register(crewsRoutes, { prefix: '/crews' });
+
+  // Partner (affiliate/reseller) program — user + admin + refund webhook
+  fastify.register(partnerRoutes);
 
   // Like / Unlike route
   fastify.register(likeRoutes);

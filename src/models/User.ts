@@ -36,7 +36,10 @@ export interface IUser extends Document {
   status: 'active' | 'banned' | 'suspended';
   banReason?: string;
   referralCode?: string;
-  referredBy?: string;
+  referredBy?: string; // partner referral code that brought this user
+  referredByPartnerId?: Types.ObjectId;
+  referredAt?: Date;
+  referralSource?: 'link' | 'signup_code' | 'manual_code' | 'admin';
   lastLogin?: Date;
   loginCount: number;
   walletBalance: number;
@@ -90,6 +93,9 @@ const UserSchema = new Schema<IUser>(
     banReason: String,
     referralCode: String,
     referredBy: String,
+    referredByPartnerId: { type: Schema.Types.ObjectId, ref: 'Partner', index: true },
+    referredAt: Date,
+    referralSource: { type: String, enum: ['link', 'signup_code', 'manual_code', 'admin'] },
     lastLogin: Date,
     loginCount: { type: Number, default: 0 },
     walletBalance: { type: Number, default: 0 },
