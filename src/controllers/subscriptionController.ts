@@ -182,6 +182,7 @@ const buildSubscriptionPayload = async (body: Record<string, any>, existing?: an
     price,
     discount,
     couponDiscount,
+    ...(body.couponCode || existing?.couponCode ? { couponCode: body.couponCode ?? existing?.couponCode } : {}),
     tax,
     totalAmount,
     status: body.status || existing?.status || 'active',
@@ -400,11 +401,36 @@ export const bulkDeleteSubscriptions = async (request: FastifyRequest, reply: Fa
 import Razorpay from 'razorpay';
 import crypto from 'crypto';
 import { SettingsModel } from '../models/Settings';
-import { recordCommissionForPayment } from '../lib/partnerCommission';
+import { recordCommissionForPayment, quotePartnerDiscount, attachReferral } from '../lib/partnerCommission';
+import { PartnerCheckoutQuoteModel } from '../models/PartnerCheckoutQuote';
+
+const publicQuote = (q: Awaited<ReturnType<typeof quotePartnerDiscount>>) => ({
+  listPrice: q.listPrice,
+  discountPercent: q.discountPercent,
+  discountAmount: q.discountAmount,
+  finalAmount: q.finalAmount,
+  code: q.discountAmount > 0 ? q.code : undefined,
+  source: q.discountAmount > 0 ? q.source : undefined,
+  message: q.message,
+});
+
+/** POST /api/app/subscription/partner-quote { planId, code? } — server-computed price for the checkout UI */
+export const quoteSubscriptionPrice = async (request: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { planId, code } = (request.body || {}) as { planId?: string; code?: string };
+    const userId = String((request.user as any)?.id || '');
+    const plan = await SubscriptionPlanModel.findById(String(planId || '').replace(/[^a-fA-F0-9]/g, '')).lean();
+    if (!plan) return reply.status(404).send({ success: false, error: 'Plan not found' });
+    const q = await quotePartnerDiscount(userId, Number(plan.totalPrice) || 0, code);
+    return reply.send({ success: true, data: publicQuote(q) });
+  } catch (error: any) {
+    return reply.status(500).send({ success: false, error: error.message });
+  }
+};
 
 export const createRazorpayOrder = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
-    const { planId } = request.body as { planId: string };
+    const { planId, partnerCode } = request.body as { planId: string; partnerCode?: string };
     const sanitizedPlanId = String(planId || '').replace(/[^a-fA-F0-9]/g, '');
     
     // Validate Plan
@@ -473,16 +499,40 @@ export const createRazorpayOrder = async (request: FastifyRequest, reply: Fastif
       });
     }
 
+    // Partner discount is computed here, server-side, and the charged amount is stored against the order id.
+    const buyerId = String((request.user as any)?.id || (request.body as any).userId || '');
+    const quote = buyerId
+      ? await quotePartnerDiscount(buyerId, plan.totalPrice || 0, partnerCode)
+      : { listPrice: plan.totalPrice || 0, discountPercent: 0, discountAmount: 0, finalAmount: plan.totalPrice || 0, message: undefined } as any;
+    const chargedPaise = Math.round(quote.finalAmount * 100);
+
     const order = await instance.orders.create({
-      amount: amountInPaise,
+      amount: chargedPaise,
       currency: settings.currencyCode || 'INR',
       receipt: `receipt_${Date.now()}`,
-    });
+      notes: quote.discountAmount > 0 ? { partnerCode: String(quote.code || ''), discountPercent: String(quote.discountPercent) } : undefined,
+    } as any);
+
+    if (buyerId) {
+      await PartnerCheckoutQuoteModel.create({
+        orderId: order.id,
+        userId: buyerId,
+        planId: plan._id,
+        listPrice: quote.listPrice,
+        discountPercent: quote.discountPercent,
+        discountAmount: quote.discountAmount,
+        finalAmount: quote.finalAmount,
+        partnerId: quote.discountAmount > 0 ? quote.partnerId : undefined,
+        code: quote.discountAmount > 0 ? quote.code : undefined,
+        source: quote.discountAmount > 0 ? quote.source : undefined,
+      });
+    }
 
     return reply.send({
       success: true,
       order,
       keyId: settings.razorpayKeyId,
+      pricing: publicQuote(quote),
     });
   } catch (error: any) {
     console.error('Razorpay Create Order Error:', error);
@@ -530,13 +580,28 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
       return reply.status(404).send({ success: false, error: 'Plan not found' });
     }
 
+    // Amount charged comes from our own order record, never from the client.
+    const quote = await PartnerCheckoutQuoteModel.findOne({ orderId: String(razorpay_order_id) }).lean();
+    if (quote && (String(quote.userId) !== sanitizedUserId || String(quote.planId) !== sanitizedPlanId)) {
+      return reply.status(400).send({ success: false, error: 'Order does not match this plan/user' });
+    }
+    const charged = quote ? quote.finalAmount : plan.totalPrice;
+    const partnerDiscount = quote ? quote.discountAmount : 0;
+
+    // A code typed at checkout attributes the (previously unattributed) buyer to that partner.
+    if (quote?.source === 'checkout_code' && quote.code && partnerDiscount > 0) {
+      await attachReferral(sanitizedUserId, quote.code, 'checkout_code').catch(() => null);
+    }
+
     const body = {
       userId: sanitizedUserId,
       planId: sanitizedPlanId,
       paymentMethod: 'Razorpay',
       status: 'active',
       price: plan.totalPrice,
-      totalAmount: plan.totalPrice,
+      couponDiscount: partnerDiscount,
+      couponCode: partnerDiscount > 0 ? quote?.code : undefined,
+      totalAmount: charged,
       duration: plan.duration,
       durationValue: plan.durationValue
     };
@@ -568,6 +633,10 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
         planName: payload.plan,
         saleAmount: Number(payload.totalAmount) || 0,
         tax: Number(payload.tax) || 0,
+        listPrice: quote ? quote.listPrice : Number(plan.totalPrice) || 0,
+        discountAmount: partnerDiscount,
+        discountPercent: quote?.discountPercent || 0,
+        discountCode: partnerDiscount > 0 ? quote?.code : undefined,
       });
     } catch (commissionErr) {
       console.error('[partner] commission record failed:', commissionErr);

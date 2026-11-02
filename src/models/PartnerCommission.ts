@@ -13,7 +13,11 @@ export interface IPartnerCommission extends Document {
   paymentId: string;
   orderId?: string;
   planName?: string;
-  saleAmount: number; // what the user paid (gross)
+  saleAmount: number; // what the user actually paid (incl. GST, after discount)
+  listPrice?: number; // plan price before partner discount
+  discountAmount?: number;
+  discountPercent?: number;
+  discountCode?: string;
   baseAmount: number; // amount commission is computed on
   rate: number; // percent applied
   amount: number; // commission in INR
@@ -39,6 +43,10 @@ const PartnerCommissionSchema = new Schema<IPartnerCommission>(
     orderId: String,
     planName: String,
     saleAmount: { type: Number, required: true, min: 0 },
+    listPrice: Number,
+    discountAmount: { type: Number, default: 0 },
+    discountPercent: { type: Number, default: 0 },
+    discountCode: String,
     baseAmount: { type: Number, required: true, min: 0 },
     rate: { type: Number, required: true, min: 0 },
     amount: { type: Number, required: true, min: 0 },

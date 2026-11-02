@@ -7,6 +7,13 @@ export interface IPartnerPayout extends Document {
   amount: number;
   commissionIds: Types.ObjectId[];
   clawbackDeducted: number;
+  // amount = gross commission payable (after clawback). TDS is withheld from it; netAmount is transferred.
+  tdsRate: number;
+  tdsAmount: number;
+  netAmount: number;
+  financialYear: string; // e.g. 2026-27 (IST, Apr–Mar)
+  pan?: string;
+  tdsSection?: string;
   method: 'upi' | 'bank';
   destination: string; // masked UPI / account snapshot
   status: PayoutStatus;
@@ -24,6 +31,12 @@ const PartnerPayoutSchema = new Schema<IPartnerPayout>(
     amount: { type: Number, required: true, min: 0 },
     commissionIds: [{ type: Schema.Types.ObjectId, ref: 'PartnerCommission' }],
     clawbackDeducted: { type: Number, default: 0 },
+    tdsRate: { type: Number, default: 0 },
+    tdsAmount: { type: Number, default: 0 },
+    netAmount: { type: Number, default: 0 },
+    financialYear: { type: String, index: true },
+    pan: String,
+    tdsSection: String,
     method: { type: String, enum: ['upi', 'bank'], default: 'upi' },
     destination: String,
     status: { type: String, enum: ['requested', 'paid', 'rejected'], default: 'requested', index: true },

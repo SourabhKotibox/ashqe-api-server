@@ -12,6 +12,8 @@ import {
   getPartnerCommissions,
   getPartnerPayouts,
   requestPartnerPayout,
+  updatePartnerPan,
+  adminTdsReport,
   adminPartnerOverview,
   adminListApplications,
   adminReviewApplication,
@@ -44,6 +46,7 @@ const partnerRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/app/partner/commissions', { preHandler: [authenticate] }, getPartnerCommissions);
   fastify.get('/app/partner/payouts', { preHandler: [authenticate] }, getPartnerPayouts);
   fastify.post('/app/partner/payouts', { preHandler: [authenticate] }, requestPartnerPayout);
+  fastify.put('/app/partner/pan', { preHandler: [authenticate] }, updatePartnerPan);
 
   // ── Admin ──
   const view = { onRequest: [requirePermission('subscriptions', 'canView')] };
@@ -56,6 +59,7 @@ const partnerRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/partners/payouts', view, adminListPayouts);
   fastify.patch('/partners/payouts/:id', edit, adminProcessPayout);
   fastify.get('/partners/settings', view, adminGetPartnerSettings);
+  fastify.get('/partners/tds-report', view, adminTdsReport);
   fastify.put('/partners/settings', edit, adminUpdatePartnerSettings);
   fastify.post('/partners/attribute', edit, adminAttributeUser);
   fastify.get('/partners', view, adminListPartners);

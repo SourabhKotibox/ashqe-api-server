@@ -12,6 +12,7 @@ export interface ISubscription extends Document {
   price: number;
   discount: number;
   couponDiscount: number;
+  couponCode?: string; // partner code that produced couponDiscount
   tax: number;
   totalAmount: number;
   status: 'active' | 'inactive';
@@ -32,6 +33,7 @@ const SubscriptionSchema = new Schema<ISubscription>(
     price: { type: Number, required: true, min: 0 },
     discount: { type: Number, default: 0, min: 0 },
     couponDiscount: { type: Number, default: 0, min: 0 },
+    couponCode: String,
     tax: { type: Number, default: 0, min: 0 },
     totalAmount: { type: Number, required: true, min: 0 },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },

@@ -5,13 +5,68 @@
 import { test, describe, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
-import { calculateCommission, effectiveRate, maskName, recordCommissionForPayment, reverseCommissionForPayment, maturePendingCommissions, getPartnerBalances, attachReferral } from '../src/lib/partnerCommission';
+import { calculateCommission, effectiveRate, maskName, recordCommissionForPayment, reverseCommissionForPayment, maturePendingCommissions, getPartnerBalances, attachReferral, applyBuyerDiscount, effectiveDiscountPercent, computeTds, financialYearOf, isValidPan, quotePartnerDiscount, tdsForPartnerPayout } from '../src/lib/partnerCommission';
+import { PartnerPayoutModel } from '../src/models/PartnerPayout';
+import { SubscriptionModel } from '../src/models/Subscription';
 import { UserModel } from '../src/models/User';
 import { PartnerModel } from '../src/models/Partner';
 import { PartnerCommissionModel } from '../src/models/PartnerCommission';
 import { PartnerProgramSettingsModel } from '../src/models/PartnerProgramSettings';
 
+describe('buyer discount', () => {
+  test('10% off a GST-inclusive ₹1,180 plan => ₹1,062', () => {
+    assert.deepEqual(applyBuyerDiscount(1180, 10), { listPrice: 1180, discountPercent: 10, discountAmount: 118, finalAmount: 1062 });
+  });
+  test('0% / disabled leaves price unchanged; capped at 90%; never below ₹1', () => {
+    assert.equal(applyBuyerDiscount(499, 0).finalAmount, 499);
+    assert.equal(applyBuyerDiscount(100, 100).discountPercent, 90);
+    assert.equal(applyBuyerDiscount(1, 50).finalAmount, 1);
+  });
+  test('per-partner override, null = default, 0 = off, program switch', () => {
+    const on = { buyerDiscountEnabled: true, buyerDiscountPercent: 10 };
+    assert.equal(effectiveDiscountPercent({ couponDiscountPercent: null }, on), 10);
+    assert.equal(effectiveDiscountPercent({ couponDiscountPercent: 15 }, on), 15);
+    assert.equal(effectiveDiscountPercent({ couponDiscountPercent: 0 }, on), 0);
+    assert.equal(effectiveDiscountPercent({ couponDiscountPercent: 15 }, { ...on, buyerDiscountEnabled: false }), 0);
+  });
+});
+
+describe('TDS (s.393 Sl.1(ii) / old 194H)', () => {
+  const base = { rate: 2, threshold: 20000 };
+  test('no TDS while FY aggregate stays at or under ₹20,000', () => {
+    assert.equal(computeTds({ ...base, gross: 15000, priorFyGross: 0, priorFyTds: 0 }).tdsAmount, 0);
+    assert.equal(computeTds({ ...base, gross: 5000, priorFyGross: 15000, priorFyTds: 0 }).tdsAmount, 0);
+  });
+  test('crossing the threshold taxes the WHOLE FY amount, crediting nothing withheld so far', () => {
+    const r = computeTds({ ...base, gross: 6000, priorFyGross: 15000, priorFyTds: 0 });
+    assert.equal(r.tdsAmount, 420); // 2% of 21,000
+    assert.equal(r.netAmount, 5580);
+  });
+  test('after threshold, each payout is taxed at 2% (prior TDS credited)', () => {
+    assert.equal(computeTds({ ...base, gross: 5000, priorFyGross: 21000, priorFyTds: 420 }).tdsAmount, 100);
+  });
+  test('₹50,000 single payout => ₹1,000 TDS, ₹49,000 net; disabled => 0', () => {
+    assert.deepEqual([computeTds({ ...base, gross: 50000, priorFyGross: 0, priorFyTds: 0 }).tdsAmount, computeTds({ ...base, gross: 50000, priorFyGross: 0, priorFyTds: 0 }).netAmount], [1000, 49000]);
+    assert.equal(computeTds({ ...base, gross: 50000, priorFyGross: 0, priorFyTds: 0, enabled: false }).tdsAmount, 0);
+  });
+  test('financial year is IST April–March', () => {
+    assert.equal(financialYearOf(new Date('2026-03-31T18:00:00Z')), '2025-26'); // 31 Mar 23:30 IST
+    assert.equal(financialYearOf(new Date('2026-03-31T18:31:00Z')), '2026-27'); // 1 Apr 00:01 IST
+  });
+  test('PAN format', () => {
+    assert.equal(isValidPan('ABCPR1234K'), true);
+    assert.equal(isValidPan('abcpr1234k'), true);
+    assert.equal(isValidPan('ABCP1234K'), false);
+    assert.equal(isValidPan(''), false);
+  });
+});
+
 describe('calculateCommission', () => {
+  test('gross base = full amount paid incl. GST (default)', () => {
+    const r = calculateCommission({ saleAmount: 1062, tax: 162, rate: 10, base: 'gross' });
+    assert.equal(r.baseAmount, 1062);
+    assert.equal(r.amount, 106.2);
+  });
   test('50,000 at 10% => 5,000 (spec example)', () => {
     assert.equal(calculateCommission({ saleAmount: 50000, rate: 10, base: 'gross' }).amount, 5000);
   });
@@ -44,7 +99,7 @@ describe('ledger (local mongo)', () => {
   before(async () => {
     await mongoose.connect(uri, { serverSelectionTimeoutMS: 3000 });
     await mongoose.connection.db!.dropDatabase();
-    await PartnerProgramSettingsModel.create({ defaultCommissionRate: 10, holdDays: 7, commissionOnRenewals: true, commissionBase: 'net', minPayout: 500, attributionWindowDays: 7 });
+    await PartnerProgramSettingsModel.create({ defaultCommissionRate: 10, holdDays: 7, commissionOnRenewals: true, minPayout: 500, attributionWindowDays: 7 }); // commissionBase defaults to 'gross'
     partnerUser = await UserModel.create({ email: 'p@test.local', name: 'Partner One' });
     buyer = await UserModel.create({ email: 'b@test.local', name: 'Buyer One' });
     partner = await PartnerModel.create({ userId: partnerUser._id, code: 'PONE1234', displayName: 'Partner One' });
@@ -75,7 +130,7 @@ describe('ledger (local mongo)', () => {
     assert.equal(b.reason, 'duplicate');
     assert.equal(await PartnerCommissionModel.countDocuments({ paymentId: 'pay_1' }), 1);
     const c = await PartnerCommissionModel.findOne({ paymentId: 'pay_1' }).lean();
-    assert.equal(c!.amount, 50);
+    assert.equal(c!.amount, 59); // 10% of ₹590 incl. GST
     assert.equal(c!.status, 'pending');
     assert.equal(c!.isRenewal, false);
   });
@@ -101,7 +156,7 @@ describe('ledger (local mongo)', () => {
     assert.ok((await maturePendingCommissions()) >= 1);
     const bal = await getPartnerBalances(partner._id);
     assert.equal(bal.pending, 0);
-    assert.equal(bal.available, 50 + 100 + 50);
+    assert.equal(bal.available, 59 + 100 + 50);
   });
 
   test('refund reversal is idempotent and removes earnings', async () => {
@@ -111,7 +166,7 @@ describe('ledger (local mongo)', () => {
     assert.equal(r1.clawback, false);
     assert.equal(r2.reversed, false);
     const bal = await getPartnerBalances(partner._id);
-    assert.equal(bal.available, 150);
+    assert.equal(bal.available, 159);
     assert.equal(bal.reversed, 50);
   });
 
@@ -121,6 +176,55 @@ describe('ledger (local mongo)', () => {
     assert.equal(r.clawback, true);
     const bal = await getPartnerBalances(partner._id);
     assert.equal(bal.clawback, 100);
-    assert.equal(bal.available, 0); // 50 approved - 100 clawback, floored at 0
+    assert.equal(bal.available, 0); // 59 approved - 100 clawback, floored at 0
+  });
+
+  test('refunded sales are excluded from revenue and sales count', async () => {
+    const bal = await getPartnerBalances(partner._id);
+    assert.equal(bal.revenue, 590); // pay_3 (500) and pay_race (1000) were refunded
+    assert.equal(bal.salesCount, 1);
+  });
+
+  test('checkout quote: attributed buyer gets partner discount on first purchase only', async () => {
+    const fresh = await UserModel.create({ email: 'f@test.local', name: 'Fresh Buyer' });
+    await attachReferral(String(fresh._id), 'PONE1234', 'link');
+    const q = await quotePartnerDiscount(String(fresh._id), 1180);
+    assert.equal(q.finalAmount, 1062);
+    assert.equal(q.source, 'attributed');
+    await SubscriptionModel.create({ userId: fresh._id, planId: new mongoose.Types.ObjectId(), duration: 'month', plan: 'premium', paymentMethod: 'Razorpay', price: 1180, totalAmount: 1062, startDate: new Date(), endDate: new Date() });
+    assert.equal((await quotePartnerDiscount(String(fresh._id), 1180)).discountAmount, 0);
+    await PartnerProgramSettingsModel.updateOne({}, { discountOnRenewals: true });
+    assert.equal((await quotePartnerDiscount(String(fresh._id), 1180)).discountAmount, 118);
+    await PartnerProgramSettingsModel.updateOne({}, { discountOnRenewals: false });
+  });
+
+  test('checkout quote: typed code for unattributed buyer, invalid & own code rejected, override honoured', async () => {
+    const walkIn = await UserModel.create({ email: 'w@test.local', name: 'Walk In' });
+    const q = await quotePartnerDiscount(String(walkIn._id), 1000, 'pone1234');
+    assert.equal(q.source, 'checkout_code');
+    assert.equal(q.finalAmount, 900);
+    assert.equal((await quotePartnerDiscount(String(walkIn._id), 1000, 'NOPE')).discountAmount, 0);
+    assert.equal((await quotePartnerDiscount(String(partnerUser._id), 1000, 'PONE1234')).discountAmount, 0);
+    await PartnerModel.updateOne({ _id: partner._id }, { couponDiscountPercent: 0 });
+    assert.equal((await quotePartnerDiscount(String(walkIn._id), 1000, 'PONE1234')).discountAmount, 0);
+    await PartnerModel.updateOne({ _id: partner._id }, { couponDiscountPercent: null });
+  });
+
+  test('commission on a discounted sale uses what was actually paid and records the discount', async () => {
+    const r: any = await recordCommissionForPayment({ userId: String(buyer._id), paymentId: 'pay_disc', saleAmount: 1062, tax: 162, listPrice: 1180, discountAmount: 118, discountPercent: 10, discountCode: 'PONE1234' });
+    assert.equal(r.commission.amount, 106.2);
+    assert.equal(r.commission.discountAmount, 118);
+    assert.equal(r.commission.listPrice, 1180);
+  });
+
+  test('payout TDS uses paid payouts in the same FY', async () => {
+    const fy = financialYearOf();
+    assert.equal((await tdsForPartnerPayout(partner._id, 15000)).tdsAmount, 0);
+    await PartnerPayoutModel.create({ partnerId: partner._id, amount: 15000, tdsAmount: 0, netAmount: 15000, financialYear: fy, status: 'paid', method: 'upi', commissionIds: [] });
+    await PartnerPayoutModel.create({ partnerId: partner._id, amount: 99999, financialYear: '2020-21', status: 'paid', method: 'upi', commissionIds: [] });
+    await PartnerPayoutModel.create({ partnerId: partner._id, amount: 99999, financialYear: fy, status: 'rejected', method: 'upi', commissionIds: [] });
+    const t = await tdsForPartnerPayout(partner._id, 6000);
+    assert.equal(t.tdsAmount, 420);
+    assert.equal(t.netAmount, 5580);
   });
 });

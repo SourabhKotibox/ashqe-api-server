@@ -45,13 +45,13 @@ export async function generatePartnerCode(name: string) {
 export async function attachReferral(
   userId: string,
   rawCode: string,
-  source: 'link' | 'signup_code' | 'manual_code' | 'admin' = 'manual_code'
+  source: 'link' | 'signup_code' | 'manual_code' | 'checkout_code' | 'admin' = 'manual_code'
 ): Promise<{ ok: boolean; error?: string; partnerCode?: string }> {
   const code = String(rawCode || '').trim().toUpperCase();
   if (!code) return { ok: false, error: 'Referral code is required' };
   const [user, partner, settings] = await Promise.all([
     UserModel.findById(userId),
-    PartnerModel.findOne({ code, status: 'active' }).lean(),
+    findActivePartnerByCode(code),
     getPartnerProgramSettings(),
   ]);
   if (!user) return { ok: false, error: 'User not found' };
@@ -59,7 +59,8 @@ export async function attachReferral(
   if (!partner) return { ok: false, error: 'Invalid or inactive referral code' };
   if (user.referredByPartnerId) return { ok: false, error: 'A referral code is already applied to this account' };
   if (String(partner.userId) === String(user._id)) return { ok: false, error: 'You cannot use your own referral code' };
-  if (source !== 'admin') {
+  // A code typed at checkout attributes the buyer at purchase time, so the signup window doesn't apply.
+  if (source !== 'admin' && source !== 'checkout_code') {
     const ageDays = (Date.now() - new Date(user.createdAt).getTime()) / 86400000;
     if (ageDays > settings.attributionWindowDays) {
       return { ok: false, error: `Referral codes can only be applied within ${settings.attributionWindowDays} days of signing up` };
@@ -87,6 +88,10 @@ export async function recordCommissionForPayment(input: {
   planName?: string;
   saleAmount: number;
   tax?: number;
+  listPrice?: number;
+  discountAmount?: number;
+  discountPercent?: number;
+  discountCode?: string;
 }) {
   if (!input.paymentId || !(input.saleAmount > 0)) return { created: false, reason: 'no_payment' as const };
   const existing = await PartnerCommissionModel.findOne({ paymentId: input.paymentId }).lean();
@@ -128,6 +133,10 @@ export async function recordCommissionForPayment(input: {
       orderId: input.orderId,
       planName: input.planName,
       saleAmount: round2(input.saleAmount),
+      listPrice: input.listPrice !== undefined ? round2(input.listPrice) : round2(input.saleAmount),
+      discountAmount: round2(input.discountAmount || 0),
+      discountPercent: input.discountPercent || 0,
+      discountCode: input.discountCode,
       baseAmount: calc.baseAmount,
       rate: calc.rate,
       amount: calc.amount,
@@ -238,4 +247,124 @@ export function maskDestination(method: string, upi?: string, acct?: string) {
   }
   if (acct) return `XXXX${acct.slice(-4)}`;
   return '-';
+}
+
+/* ───────────────────────────── Buyer discount ───────────────────────────── */
+
+/** Find an active partner by referral code OR vanity coupon code. */
+export async function findActivePartnerByCode(rawCode: string) {
+  const code = String(rawCode || '').trim().toUpperCase();
+  if (!code) return null;
+  return PartnerModel.findOne({ status: 'active', $or: [{ code }, { couponCode: code }] }).lean();
+}
+
+/** Buyer discount % for a partner: per-partner override, else program default; 0 when disabled. */
+export function effectiveDiscountPercent(
+  partner: { couponDiscountPercent?: number | null },
+  settings: { buyerDiscountEnabled?: boolean; buyerDiscountPercent?: number }
+) {
+  if (!settings.buyerDiscountEnabled) return 0;
+  const p = partner.couponDiscountPercent === null || partner.couponDiscountPercent === undefined
+    ? Number(settings.buyerDiscountPercent) || 0
+    : Number(partner.couponDiscountPercent) || 0;
+  return Math.min(90, Math.max(0, p));
+}
+
+/** Pure: apply a % discount to a GST-inclusive price; rounded to whole paise, never below ₹1. */
+export function applyBuyerDiscount(listPrice: number, percent: number) {
+  const price = round2(Math.max(0, Number(listPrice) || 0));
+  const pct = Math.min(90, Math.max(0, Number(percent) || 0));
+  if (!price || !pct) return { listPrice: price, discountPercent: 0, discountAmount: 0, finalAmount: price };
+  let discountAmount = round2((price * pct) / 100);
+  if (price - discountAmount < 1) discountAmount = round2(price - 1);
+  return { listPrice: price, discountPercent: pct, discountAmount, finalAmount: round2(price - discountAmount) };
+}
+
+/**
+ * Server-side checkout quote. The buyer's existing attribution always wins; a typed code only
+ * applies if the buyer isn't attributed yet. Never trusts a client price.
+ */
+export async function quotePartnerDiscount(userId: string, listPrice: number, rawCode?: string) {
+  const none = (message?: string) => ({ ...applyBuyerDiscount(listPrice, 0), partnerId: undefined as any, code: undefined as string | undefined, source: undefined as 'attributed' | 'checkout_code' | undefined, message });
+  const settings = await getPartnerProgramSettings();
+  if (!settings.enabled) return none(rawCode ? 'Partner codes are not active right now' : undefined);
+  const user = await UserModel.findById(userId).select('referredByPartnerId').lean();
+  if (!user) return none('User not found');
+
+  let partner: any = null;
+  let source: 'attributed' | 'checkout_code' | undefined;
+  let typedCode: string | undefined;
+  const typed = String(rawCode || '').trim().toUpperCase();
+  if (user.referredByPartnerId) {
+    partner = await PartnerModel.findOne({ _id: user.referredByPartnerId, status: 'active' }).lean();
+    source = 'attributed';
+  } else if (typed) {
+    partner = await findActivePartnerByCode(typed);
+    if (!partner) return none('Invalid or inactive partner code');
+    if (String(partner.userId) === String(userId)) return none('You cannot use your own partner code');
+    source = 'checkout_code';
+    typedCode = typed;
+  }
+  if (!partner) return none(typed ? 'Invalid or inactive partner code' : undefined);
+
+  if (!settings.discountOnRenewals) {
+    const { SubscriptionModel } = await import('../models/Subscription');
+    const paidBefore = await SubscriptionModel.exists({ userId, paymentMethod: 'Razorpay', totalAmount: { $gt: 0 } });
+    if (paidBefore) {
+      return { ...none('Partner discount applies to your first subscription only'), partnerId: partner._id, code: typedCode || partner.code, source };
+    }
+  }
+  const pct = effectiveDiscountPercent(partner, settings);
+  const calc = applyBuyerDiscount(listPrice, pct);
+  let message: string | undefined = calc.discountAmount > 0 ? `${pct}% partner discount applied` : 'This partner code has no buyer discount';
+  if (source === 'attributed' && typed && typed !== partner.code && typed !== partner.couponCode) {
+    message = `Your account is already linked to partner ${partner.code}; that discount is applied instead`;
+  }
+  return { ...calc, partnerId: partner._id, code: typedCode || partner.couponCode || partner.code, source, message };
+}
+
+/* ───────────────────────────── TDS (s.393 / old 194H) ───────────────────────────── */
+
+export const PAN_REGEX = /^[A-Z]{5}[0-9]{4}[A-Z]$/;
+export const isValidPan = (pan?: string | null) => PAN_REGEX.test(String(pan || '').trim().toUpperCase());
+
+/** Indian financial year label for a date, in IST: Apr 2026–Mar 2027 => "2026-27". */
+export function financialYearOf(d: Date = new Date()) {
+  const ist = new Date(d.getTime() + 330 * 60000);
+  const y = ist.getUTCFullYear();
+  const start = ist.getUTCMonth() >= 3 ? y : y - 1;
+  return `${start}-${String((start + 1) % 100).padStart(2, '0')}`;
+}
+
+/**
+ * Pure TDS calculator. Once the FY aggregate (previous payouts + this one) exceeds the threshold,
+ * TDS applies on the ENTIRE FY amount; tax already withheld earlier in the FY is credited.
+ */
+export function computeTds(p: { gross: number; priorFyGross: number; priorFyTds: number; rate: number; threshold: number; enabled?: boolean }) {
+  const gross = round2(Math.max(0, p.gross));
+  if (p.enabled === false || !(p.rate > 0)) return { tdsAmount: 0, netAmount: gross, rate: 0, aggregate: round2(p.priorFyGross + gross) };
+  const aggregate = round2(Math.max(0, p.priorFyGross) + gross);
+  if (aggregate <= p.threshold) return { tdsAmount: 0, netAmount: gross, rate: p.rate, aggregate };
+  const due = round2((aggregate * p.rate) / 100 - Math.max(0, p.priorFyTds));
+  const tdsAmount = Math.min(gross, Math.max(0, due));
+  return { tdsAmount, netAmount: round2(gross - tdsAmount), rate: p.rate, aggregate };
+}
+
+/** TDS for a payout of `gross` to a partner, using PAID payouts earlier in the same FY. */
+export async function tdsForPartnerPayout(partnerId: string | Types.ObjectId, gross: number, at = new Date(), excludePayoutId?: string) {
+  const { PartnerPayoutModel } = await import('../models/PartnerPayout');
+  const settings = await getPartnerProgramSettings();
+  const fy = financialYearOf(at);
+  const match: any = { partnerId: new Types.ObjectId(String(partnerId)), status: 'paid', financialYear: fy };
+  if (excludePayoutId) match._id = { $ne: new Types.ObjectId(String(excludePayoutId)) };
+  const agg = await PartnerPayoutModel.aggregate([{ $match: match }, { $group: { _id: null, gross: { $sum: '$amount' }, tds: { $sum: '$tdsAmount' } } }]);
+  const r = computeTds({
+    gross,
+    priorFyGross: agg[0]?.gross || 0,
+    priorFyTds: agg[0]?.tds || 0,
+    rate: settings.tdsRate,
+    threshold: settings.tdsThresholdPerFY,
+    enabled: settings.tdsEnabled,
+  });
+  return { ...r, financialYear: fy, section: settings.tdsSection };
 }

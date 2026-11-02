@@ -19,7 +19,14 @@ import {
   reverseCommissionForPayment,
   round2,
   effectiveRate,
+  effectiveDiscountPercent,
+  findActivePartnerByCode,
+  isValidPan,
+  financialYearOf,
+  tdsForPartnerPayout,
 } from '../lib/partnerCommission';
+
+const maskPan = (pan?: string | null) => (pan ? `${pan.slice(0, 2)}XXX${pan.slice(5, 9).replace(/./g, 'X')}${pan.slice(-1)}` : null);
 
 const uid = (request: FastifyRequest) => String((request.user as any)?.id || '');
 const siteUrl = () => (process.env.FRONTEND_URL || 'https://ashqe.app').replace(/\/$/, '');
@@ -165,9 +172,18 @@ export const applyReferralCode = async (request: FastifyRequest, reply: FastifyR
 /** GET /api/public/partner/:code — validate a referral code (no auth) */
 export const validatePartnerCode = async (request: FastifyRequest, reply: FastifyReply) => {
   const code = String((request.params as any).code || '').toUpperCase();
-  const partner = await PartnerModel.findOne({ code, status: 'active' }).select('code displayName').lean();
+  const partner = await findActivePartnerByCode(code);
   if (!partner) return reply.status(404).send({ success: false, message: 'Invalid referral code' });
-  return reply.send({ success: true, data: { code: partner.code, partnerName: partner.displayName.split(' ')[0] } });
+  const settings = await getPartnerProgramSettings();
+  return reply.send({
+    success: true,
+    data: {
+      code,
+      partnerName: partner.displayName.split(' ')[0],
+      buyerDiscountPercent: settings.enabled ? effectiveDiscountPercent(partner, settings) : 0,
+      discountFirstPurchaseOnly: !settings.discountOnRenewals,
+    },
+  });
 };
 
 async function requirePartner(request: FastifyRequest, reply: FastifyReply) {
@@ -233,6 +249,29 @@ export async function buildPartnerStats(partnerId: Types.ObjectId, days = 30) {
   };
 }
 
+async function partnerFyTds(partnerId: Types.ObjectId, fy = financialYearOf()) {
+  const agg = await PartnerPayoutModel.aggregate([
+    { $match: { partnerId: new Types.ObjectId(String(partnerId)), status: 'paid', financialYear: fy } },
+    { $group: { _id: null, gross: { $sum: '$amount' }, tds: { $sum: '$tdsAmount' }, net: { $sum: '$netAmount' }, n: { $sum: 1 } } },
+  ]);
+  return { financialYear: fy, grossPaid: round2(agg[0]?.gross || 0), tdsDeducted: round2(agg[0]?.tds || 0), netPaid: round2(agg[0]?.net || 0), payouts: agg[0]?.n || 0 };
+}
+
+/** PUT /api/app/partner/pan { pan } — partner saves PAN (required before first payout) */
+export const updatePartnerPan = async (request: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const partner = await requirePartner(request, reply);
+    if (!partner) return;
+    const pan = String((request.body as any)?.pan || '').trim().toUpperCase();
+    if (!isValidPan(pan)) return reply.status(400).send({ success: false, message: 'Enter a valid PAN (format AAAAA9999A)' });
+    partner.pan = pan;
+    await partner.save();
+    return reply.send({ success: true, data: { pan: maskPan(pan), panOnFile: true } });
+  } catch (error: any) {
+    return reply.status(500).send({ success: false, message: error.message });
+  }
+};
+
 /** GET /api/app/partner/dashboard?days=30 */
 export const getPartnerDashboard = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
@@ -253,8 +292,21 @@ export const getPartnerDashboard = async (request: FastifyRequest, reply: Fastif
           couponCode: partner.couponCode || null,
           payoutMethod: partner.payoutMethod,
           payoutDestination: maskDestination(partner.payoutMethod, partner.upiId, partner.bankAccountNumber),
+          buyerDiscountPercent: effectiveDiscountPercent(partner, settings),
+          pan: maskPan(partner.pan),
+          panOnFile: isValidPan(partner.pan),
         },
-        program: { minPayout: settings.minPayout, holdDays: settings.holdDays, commissionOnRenewals: settings.commissionOnRenewals },
+        program: {
+          minPayout: settings.minPayout,
+          holdDays: settings.holdDays,
+          commissionOnRenewals: settings.commissionOnRenewals,
+          commissionBase: settings.commissionBase,
+          discountOnRenewals: settings.discountOnRenewals,
+          tdsEnabled: settings.tdsEnabled,
+          tdsRate: settings.tdsRate,
+          tdsThresholdPerFY: settings.tdsThresholdPerFY,
+        },
+        tds: { ...(await partnerFyTds(partner._id as Types.ObjectId)), estimateOnAvailable: await tdsForPartnerPayout(partner._id as Types.ObjectId, stats.availableBalance) },
         stats,
       },
     });
@@ -367,6 +419,9 @@ export const requestPartnerPayout = async (request: FastifyRequest, reply: Fasti
     if (await PartnerPayoutModel.exists({ partnerId: partner._id, status: 'requested' })) {
       return reply.status(400).send({ success: false, message: 'You already have a payout request in progress' });
     }
+    if (!isValidPan(partner.pan)) {
+      return reply.status(400).send({ success: false, code: 'PAN_REQUIRED', message: 'Add a valid PAN (AAAAA9999A) before requesting your first payout — it is required for TDS.' });
+    }
     const settings = await getPartnerProgramSettings();
     const balances = await getPartnerBalances(partner._id as Types.ObjectId);
     if (balances.available < settings.minPayout) {
@@ -375,9 +430,17 @@ export const requestPartnerPayout = async (request: FastifyRequest, reply: Fasti
     const commissions = await PartnerCommissionModel.find({ partnerId: partner._id, status: 'approved', payoutId: { $exists: false } }).select('_id amount').lean();
     const gross = round2(commissions.reduce((s, c) => s + c.amount, 0));
     const clawback = Math.min(gross, balances.clawback);
+    const payable = round2(gross - clawback);
+    const tds = await tdsForPartnerPayout(partner._id as Types.ObjectId, payable);
     const payout = await PartnerPayoutModel.create({
       partnerId: partner._id,
-      amount: round2(gross - clawback),
+      amount: payable,
+      tdsRate: tds.rate,
+      tdsAmount: tds.tdsAmount,
+      netAmount: tds.netAmount,
+      financialYear: tds.financialYear,
+      tdsSection: tds.section,
+      pan: partner.pan,
       commissionIds: commissions.map((c) => c._id),
       clawbackDeducted: clawback,
       method: partner.payoutMethod,
@@ -388,7 +451,7 @@ export const requestPartnerPayout = async (request: FastifyRequest, reply: Fasti
       { _id: { $in: commissions.map((c) => c._id) }, payoutId: { $exists: false } },
       { $set: { payoutId: payout._id } }
     );
-    AdminNotificationModel.create({ title: 'Partner payout requested', message: `${partner.displayName} requested ₹${payout.amount}`, type: 'system', modelName: 'PartnerPayout', action: 'created' }).catch(() => {});
+    AdminNotificationModel.create({ title: 'Partner payout requested', message: `${partner.displayName} requested ₹${payout.amount} (TDS ₹${payout.tdsAmount}, net ₹${payout.netAmount})`, type: 'system', modelName: 'PartnerPayout', action: 'created' }).catch(() => {});
     return reply.send({ success: true, message: 'Payout requested', data: payout });
   } catch (error: any) {
     return reply.status(500).send({ success: false, message: error.message });
@@ -616,7 +679,19 @@ export const adminUpdatePartner = async (request: FastifyRequest, reply: Fastify
     }
     if (b.status && ['active', 'suspended'].includes(b.status)) update.status = b.status;
     if ('couponCode' in b) update.couponCode = b.couponCode ? String(b.couponCode).toUpperCase() : undefined;
-    if ('couponDiscountPercent' in b) update.couponDiscountPercent = b.couponDiscountPercent === '' ? undefined : Number(b.couponDiscountPercent);
+    if ('couponDiscountPercent' in b) {
+      if (b.couponDiscountPercent === null || b.couponDiscountPercent === '') update.couponDiscountPercent = null;
+      else {
+        const d = Number(b.couponDiscountPercent);
+        if (!(d >= 0 && d <= 90)) return reply.status(400).send({ success: false, error: 'Buyer discount must be 0–90%' });
+        update.couponDiscountPercent = d;
+      }
+    }
+    if ('pan' in b) {
+      const pan = String(b.pan || '').trim().toUpperCase();
+      if (pan && !isValidPan(pan)) return reply.status(400).send({ success: false, error: 'Invalid PAN (format AAAAA9999A)' });
+      update.pan = pan || undefined;
+    }
     if ('notes' in b) update.notes = String(b.notes || '');
     if (b.code) {
       const code = String(b.code).toUpperCase().replace(/[^A-Z0-9]/g, '');
@@ -694,6 +769,17 @@ export const adminProcessPayout = async (request: FastifyRequest, reply: Fastify
     if (payout.status !== 'requested') return reply.status(400).send({ success: false, error: `Payout already ${payout.status}` });
     if (b.action === 'paid') {
       if (!b.reference?.trim()) return reply.status(400).send({ success: false, error: 'Payment reference (UTR) is required' });
+      const partner = await PartnerModel.findById(payout.partnerId).select('pan').lean();
+      if (!isValidPan(partner?.pan)) return reply.status(400).send({ success: false, error: 'Partner has no valid PAN on file — payout blocked' });
+      // TDS is finalised at payment time against PAID payouts earlier in the same FY.
+      const paidAt = new Date();
+      const tds = await tdsForPartnerPayout(payout.partnerId as any, payout.amount, paidAt, String(payout._id));
+      payout.tdsRate = tds.rate;
+      payout.tdsAmount = tds.tdsAmount;
+      payout.netAmount = tds.netAmount;
+      payout.financialYear = tds.financialYear;
+      payout.tdsSection = tds.section;
+      payout.pan = partner!.pan;
       payout.status = 'paid';
       payout.reference = b.reference.trim();
       await PartnerCommissionModel.updateMany({ payoutId: payout._id, status: 'approved' }, { $set: { status: 'paid', paidAt: new Date() } });
@@ -730,6 +816,13 @@ export const adminUpdatePartnerSettings = async (request: FastifyRequest, reply:
       minPayout: z.coerce.number().min(0).optional(),
       attributionWindowDays: z.coerce.number().int().min(0).max(365).optional(),
       commissionBase: z.enum(['net', 'gross']).optional(),
+      buyerDiscountEnabled: z.boolean().optional(),
+      buyerDiscountPercent: z.coerce.number().min(0).max(90).optional(),
+      discountOnRenewals: z.boolean().optional(),
+      tdsEnabled: z.boolean().optional(),
+      tdsRate: z.coerce.number().min(0).max(30).optional(),
+      tdsThresholdPerFY: z.coerce.number().min(0).optional(),
+      tdsSection: z.string().max(80).optional(),
       reviewSlaHours: z.coerce.number().int().min(1).max(720).optional(),
       termsUrl: z.string().optional(),
     });
@@ -738,6 +831,31 @@ export const adminUpdatePartnerSettings = async (request: FastifyRequest, reply:
     await getPartnerProgramSettings();
     const doc = await PartnerProgramSettingsModel.findOneAndUpdate({}, { $set: parsed.data }, { returnDocument: 'after' }).lean();
     return reply.send({ success: true, data: doc });
+  } catch (error: any) {
+    return reply.status(500).send({ success: false, error: error.message });
+  }
+};
+
+/** GET /api/partners/tds-report?fy=2026-27 — CSV of TDS by partner for one financial year (paid payouts) */
+export const adminTdsReport = async (request: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const fy = /^\d{4}-\d{2}$/.test(String((request.query as any)?.fy || '')) ? String((request.query as any).fy) : financialYearOf();
+    const rows = await PartnerPayoutModel.aggregate([
+      { $match: { status: 'paid', financialYear: fy } },
+      { $group: { _id: '$partnerId', gross: { $sum: '$amount' }, tds: { $sum: '$tdsAmount' }, net: { $sum: '$netAmount' }, payouts: { $sum: 1 }, pan: { $last: '$pan' }, section: { $last: '$tdsSection' }, last: { $max: '$processedAt' } } },
+      { $lookup: { from: 'partners', localField: '_id', foreignField: '_id', as: 'p' } },
+      { $unwind: { path: '$p', preserveNullAndEmptyArrays: true } },
+      { $sort: { tds: -1 } },
+    ]);
+    const esc = (v: any) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const lines = [['Financial year', 'Partner', 'Code', 'PAN', 'Section', 'Payouts', 'Gross commission (INR)', 'TDS deducted (INR)', 'Net paid (INR)', 'Last payout (IST)'].join(',')];
+    for (const r of rows) {
+      lines.push([fy, r.p?.displayName, r.p?.code, r.pan || r.p?.pan, r.section, r.payouts, round2(r.gross).toFixed(2), round2(r.tds).toFixed(2), round2(r.net).toFixed(2),
+        r.last ? new Date(r.last).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' }) : ''].map(esc).join(','));
+    }
+    reply.header('Content-Type', 'text/csv; charset=utf-8');
+    reply.header('Content-Disposition', `attachment; filename="partner-tds-${fy}.csv"`);
+    return reply.send(lines.join('\n') + '\n');
   } catch (error: any) {
     return reply.status(500).send({ success: false, error: error.message });
   }

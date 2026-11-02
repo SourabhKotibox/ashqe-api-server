@@ -9,8 +9,8 @@ export interface IPartner extends Document {
   phone?: string;
   commissionRate?: number | null; // percent override; null/undefined = program default
   status: 'active' | 'suspended';
-  couponCode?: string; // optional discount coupon tied to this partner (not yet applied at checkout)
-  couponDiscountPercent?: number;
+  couponCode?: string; // optional vanity coupon; works at checkout like the partner code
+  couponDiscountPercent?: number | null; // buyer discount override; null/undefined = program default, 0 = off
   payoutMethod: 'upi' | 'bank';
   upiId?: string;
   bankAccountName?: string;
@@ -35,7 +35,7 @@ const PartnerSchema = new Schema<IPartner>(
     commissionRate: { type: Number, min: 0, max: 100, default: null },
     status: { type: String, enum: ['active', 'suspended'], default: 'active', index: true },
     couponCode: { type: String, uppercase: true, trim: true },
-    couponDiscountPercent: { type: Number, min: 0, max: 100 },
+    couponDiscountPercent: { type: Number, min: 0, max: 90, default: null },
     payoutMethod: { type: String, enum: ['upi', 'bank'], default: 'upi' },
     upiId: String,
     bankAccountName: String,
