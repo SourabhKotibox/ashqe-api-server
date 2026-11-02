@@ -439,7 +439,8 @@ export const adminListApplications = async (request: FastifyRequest, reply: Fast
     const page = Math.max(1, Number(q.page) || 1);
     const limit = Math.min(100, Math.max(1, Number(q.limit) || 20));
     const filter: any = {};
-    if (q.status && q.status !== 'all') filter.status = q.status;
+    if (q.status === 'open') filter.status = { $in: ['pending', 'under_review'] };
+    else if (q.status && q.status !== 'all') filter.status = q.status;
     if (q.search) {
       const rx = new RegExp(String(q.search).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
       filter.$or = [{ fullName: rx }, { email: rx }, { phone: rx }, { city: rx }];
@@ -622,7 +623,7 @@ export const adminUpdatePartner = async (request: FastifyRequest, reply: Fastify
       if (await PartnerModel.exists({ code, _id: { $ne: id } })) return reply.status(400).send({ success: false, error: 'Code already in use' });
       update.code = code;
     }
-    const partner = await PartnerModel.findByIdAndUpdate(id, { $set: update }, { new: true }).lean();
+    const partner = await PartnerModel.findByIdAndUpdate(id, { $set: update }, { returnDocument: 'after' }).lean();
     if (!partner) return reply.status(404).send({ success: false, error: 'Partner not found' });
     if (update.code) await UserModel.updateMany({ referredByPartnerId: partner._id }, { $set: { referredBy: partner.code } });
     return reply.send({ success: true, data: partner });
@@ -735,7 +736,7 @@ export const adminUpdatePartnerSettings = async (request: FastifyRequest, reply:
     const parsed = schema.safeParse(b);
     if (!parsed.success) return reply.status(400).send({ success: false, error: 'Validation failed', errors: parsed.error.flatten().fieldErrors });
     await getPartnerProgramSettings();
-    const doc = await PartnerProgramSettingsModel.findOneAndUpdate({}, { $set: parsed.data }, { new: true }).lean();
+    const doc = await PartnerProgramSettingsModel.findOneAndUpdate({}, { $set: parsed.data }, { returnDocument: 'after' }).lean();
     return reply.send({ success: true, data: doc });
   } catch (error: any) {
     return reply.status(500).send({ success: false, error: error.message });

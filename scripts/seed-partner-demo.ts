@@ -69,7 +69,7 @@ async function main() {
     const u = await UserModel.create({ email: `applicant${i}@partner-demo.local`, name: n, phone: `98765100${i}0` } as any);
     await PartnerApplicationModel.create({
       userId: u._id, fullName: n, email: u.email, phone: `98765100${i}0`, city, state: '',
-      promotionChannels: i === 1 ? ['whatsapp', 'telegram'] : ['instagram'], audienceSize: ['10k-50k', '1k-10k', '100k+'][i], socialLinks: [],
+      promotionChannels: i === 1 ? ['social', 'other'] : ['instagram'], audienceSize: ['10k-50k', '1k-10k', '100k+'][i], socialLinks: [],
       payoutMethod: 'upi', upiId: `user${i}@upi`, agreedToTerms: true, status: i === 2 ? 'under_review' : 'pending', createdAt: new Date(Date.now() - (i + 1) * 3600000),
     } as any);
   }
