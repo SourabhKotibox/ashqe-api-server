@@ -61,7 +61,10 @@ export async function attachReferral(
   if (String(partner.userId) === String(user._id)) return { ok: false, error: 'You cannot use your own referral code' };
   // A code typed at checkout attributes the buyer at purchase time, so the signup window doesn't apply.
   if (source !== 'admin' && source !== 'checkout_code') {
-    const ageDays = (Date.now() - new Date(user.createdAt).getTime()) / 86400000;
+    const createdAtMs = user.createdAt
+      ? new Date(user.createdAt).getTime()
+      : ((user._id as any)?.getTimestamp ? (user._id as any).getTimestamp().getTime() : Date.now());
+    const ageDays = (Date.now() - createdAtMs) / 86400000;
     if (ageDays > settings.attributionWindowDays) {
       return { ok: false, error: `Referral codes can only be applied within ${settings.attributionWindowDays} days of signing up` };
     }

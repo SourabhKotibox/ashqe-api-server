@@ -91,6 +91,7 @@ const verifyOtpSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   deviceId: z.string().optional(),
   deviceName: z.string().optional(),
+  referralCode: z.string().trim().optional(),
 });
 
 const setLanguageSchema = z.object({
@@ -309,6 +310,20 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
     userDoc.loginCount = (userDoc.loginCount || 0) + 1;
     await userDoc.save();
 
+    // Partner program: optional referral code at signup/login
+    const refCode = body.data.referralCode || (request.body as any)?.referralCode;
+    if (refCode && !userDoc.referredByPartnerId) {
+      try {
+        await attachReferral(
+          userDoc._id.toString(),
+          String(refCode),
+          allUsersWithPhone.length === 0 ? 'signup_code' : 'manual_code'
+        );
+      } catch (refErr) {
+        console.error('[verifyOtp] referral attach failed:', refErr);
+      }
+    }
+
     const server = request.server as any;
     const tokenPayload = {
       id: userDoc._id.toString(),
@@ -437,6 +452,7 @@ const registerSchema = z.object({
   password: z.string().min(6),
   name: z.string(),
   phone: z.string().optional(),
+  referralCode: z.string().trim().optional(),
 });
 
 export const registerUser = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -479,9 +495,13 @@ export const registerUser = async (request: FastifyRequest, reply: FastifyReply)
     await user.save();
 
     // Partner program: optional referral code at signup (never blocks registration)
-    const referralCode = (request.body as any)?.referralCode;
+    const referralCode = body.data.referralCode || (request.body as any)?.referralCode;
     if (referralCode) {
-      attachReferral(user._id.toString(), String(referralCode), 'signup_code').catch((e) => console.error('[partner] referral attach failed', e));
+      try {
+        await attachReferral(user._id.toString(), String(referralCode), 'signup_code');
+      } catch (refErr) {
+        console.error('[partner] referral attach failed:', refErr);
+      }
     }
 
     sendTemplateEmail('Registration', email, {

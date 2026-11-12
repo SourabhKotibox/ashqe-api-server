@@ -522,9 +522,9 @@ export const createRazorpayOrder = async (request: FastifyRequest, reply: Fastif
         discountPercent: quote.discountPercent,
         discountAmount: quote.discountAmount,
         finalAmount: quote.finalAmount,
-        partnerId: quote.discountAmount > 0 ? quote.partnerId : undefined,
-        code: quote.discountAmount > 0 ? quote.code : undefined,
-        source: quote.discountAmount > 0 ? quote.source : undefined,
+        partnerId: quote.partnerId || undefined,
+        code: quote.code || undefined,
+        source: quote.source || undefined,
       });
     }
 
@@ -589,7 +589,7 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
     const partnerDiscount = quote ? quote.discountAmount : 0;
 
     // A code typed at checkout attributes the (previously unattributed) buyer to that partner.
-    if (quote?.source === 'checkout_code' && quote.code && partnerDiscount > 0) {
+    if (quote?.source === 'checkout_code' && quote.code) {
       await attachReferral(sanitizedUserId, quote.code, 'checkout_code').catch(() => null);
     }
 
@@ -600,7 +600,7 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
       status: 'active',
       price: plan.totalPrice,
       couponDiscount: partnerDiscount,
-      couponCode: partnerDiscount > 0 ? quote?.code : undefined,
+      couponCode: quote?.code || undefined,
       totalAmount: charged,
       duration: plan.duration,
       durationValue: plan.durationValue
@@ -636,7 +636,7 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
         listPrice: quote ? quote.listPrice : Number(plan.totalPrice) || 0,
         discountAmount: partnerDiscount,
         discountPercent: quote?.discountPercent || 0,
-        discountCode: partnerDiscount > 0 ? quote?.code : undefined,
+        discountCode: quote?.code || undefined,
       });
     } catch (commissionErr) {
       console.error('[partner] commission record failed:', commissionErr);
