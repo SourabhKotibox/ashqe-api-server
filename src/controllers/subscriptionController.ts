@@ -459,6 +459,12 @@ export const createRazorpayOrder = async (request: FastifyRequest, reply: Fastif
         return reply.status(400).send({ success: false, error: 'User ID is required for free plans' });
       }
 
+      if (partnerCode) {
+        await attachReferral(String(userId), String(partnerCode), 'checkout_code').catch((e) =>
+          console.error('[createRazorpayOrder free] attachReferral failed:', e)
+        );
+      }
+
       const body = {
         userId,
         planId,
@@ -589,8 +595,11 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
     const partnerDiscount = quote ? quote.discountAmount : 0;
 
     // A code typed at checkout attributes the (previously unattributed) buyer to that partner.
-    if (quote?.source === 'checkout_code' && quote.code) {
-      await attachReferral(sanitizedUserId, quote.code, 'checkout_code').catch(() => null);
+    const codeToAttach = quote?.code || (request.body as any)?.partnerCode;
+    if (codeToAttach) {
+      await attachReferral(sanitizedUserId, String(codeToAttach), 'checkout_code').catch((e) =>
+        console.error('[verifyRazorpayPayment] attachReferral failed:', e)
+      );
     }
 
     const body = {
@@ -636,7 +645,7 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
         listPrice: quote ? quote.listPrice : Number(plan.totalPrice) || 0,
         discountAmount: partnerDiscount,
         discountPercent: quote?.discountPercent || 0,
-        discountCode: quote?.code || undefined,
+        discountCode: quote?.code || codeToAttach || undefined,
       });
     } catch (commissionErr) {
       console.error('[partner] commission record failed:', commissionErr);

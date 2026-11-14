@@ -291,26 +291,25 @@ export async function quotePartnerDiscount(userId: string, listPrice: number, ra
   const none = (message?: string) => ({ ...applyBuyerDiscount(listPrice, 0), partnerId: undefined as any, code: undefined as string | undefined, source: undefined as 'attributed' | 'checkout_code' | undefined, message });
   const settings = await getPartnerProgramSettings();
   if (!settings.enabled) return none(rawCode ? 'Partner codes are not active right now' : undefined);
-  const user = await UserModel.findById(userId).select('referredByPartnerId').lean();
-  if (!user) return none('User not found');
+  const user = userId ? await UserModel.findById(userId).select('referredByPartnerId').lean() : null;
 
   let partner: any = null;
   let source: 'attributed' | 'checkout_code' | undefined;
   let typedCode: string | undefined;
   const typed = String(rawCode || '').trim().toUpperCase();
-  if (user.referredByPartnerId) {
+  if (user?.referredByPartnerId) {
     partner = await PartnerModel.findOne({ _id: user.referredByPartnerId, status: 'active' }).lean();
     source = 'attributed';
   } else if (typed) {
     partner = await findActivePartnerByCode(typed);
     if (!partner) return none('Invalid or inactive partner code');
-    if (String(partner.userId) === String(userId)) return none('You cannot use your own partner code');
+    if (userId && String(partner.userId) === String(userId)) return none('You cannot use your own partner code');
     source = 'checkout_code';
     typedCode = typed;
   }
   if (!partner) return none(typed ? 'Invalid or inactive partner code' : undefined);
 
-  if (!settings.discountOnRenewals) {
+  if (userId && !settings.discountOnRenewals) {
     const { SubscriptionModel } = await import('../models/Subscription');
     const paidBefore = await SubscriptionModel.exists({ userId, paymentMethod: 'Razorpay', totalAmount: { $gt: 0 } });
     if (paidBefore) {

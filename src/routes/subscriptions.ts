@@ -1,5 +1,5 @@
 import { requirePermission } from '../middlewares/rbac';
-import { authenticate } from '../middlewares/auth';
+import { authenticate, authenticateOptional } from '../middlewares/auth';
 import type { FastifyPluginAsync } from 'fastify';
 import {
   listSubscriptions,
@@ -27,7 +27,7 @@ const subscriptionRoutes: FastifyPluginAsync = async (fastify) => {
 
   // Razorpay — user-facing (any authenticated user, not just admins)
   fastify.post('/app/subscription/razorpay/order', { preHandler: [authenticate] }, createRazorpayOrder);
-  fastify.post('/app/subscription/partner-quote', { preHandler: [authenticate] }, quoteSubscriptionPrice);
+  fastify.post('/app/subscription/partner-quote', { preHandler: [authenticateOptional] }, quoteSubscriptionPrice);
   fastify.post('/app/subscription/razorpay/verify', { preHandler: [authenticate] }, verifyRazorpayPayment);
 };
 

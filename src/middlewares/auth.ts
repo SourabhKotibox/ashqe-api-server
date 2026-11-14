@@ -22,3 +22,20 @@ export async function authenticate(request: FastifyRequest, reply: FastifyReply)
     return reply.status(401).send({ error: 'Unauthorized — valid Bearer token required' });
   }
 }
+
+export async function authenticateOptional(request: FastifyRequest, _reply: FastifyReply) {
+  try {
+    await request.jwtVerify();
+    const userId = (request.user as any)?.id;
+    const role = (request.user as any)?.role;
+
+    if (userId && role === 'user') {
+      const user = await UserModel.findById(userId).select('status banReason').lean();
+      if (!user || user.status === 'banned' || user.status === 'suspended') {
+        (request as any).user = undefined;
+      }
+    }
+  } catch {
+    (request as any).user = undefined;
+  }
+}

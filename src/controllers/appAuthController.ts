@@ -1,5 +1,4 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { attachReferral } from '../lib/partnerCommission';
 import { z } from 'zod';
 import { UserModel } from '../models/User';
 import { SubscriptionPlanModel } from '../models/SubscriptionPlan';
@@ -310,20 +309,6 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
     userDoc.loginCount = (userDoc.loginCount || 0) + 1;
     await userDoc.save();
 
-    // Partner program: optional referral code at signup/login
-    const refCode = body.data.referralCode || (request.body as any)?.referralCode;
-    if (refCode && !userDoc.referredByPartnerId) {
-      try {
-        await attachReferral(
-          userDoc._id.toString(),
-          String(refCode),
-          allUsersWithPhone.length === 0 ? 'signup_code' : 'manual_code'
-        );
-      } catch (refErr) {
-        console.error('[verifyOtp] referral attach failed:', refErr);
-      }
-    }
-
     const server = request.server as any;
     const tokenPayload = {
       id: userDoc._id.toString(),
@@ -493,16 +478,6 @@ export const registerUser = async (request: FastifyRequest, reply: FastifyReply)
     const newProfile = { name, isKids: false, maturityLevel: 18, language: 'Hindi' };
     const user = new UserModel({ email, passwordHash, name, phone: phone || undefined, profiles: [newProfile], preferredLanguage: 'Hindi', languageSelectionSkipped: false });
     await user.save();
-
-    // Partner program: optional referral code at signup (never blocks registration)
-    const referralCode = body.data.referralCode || (request.body as any)?.referralCode;
-    if (referralCode) {
-      try {
-        await attachReferral(user._id.toString(), String(referralCode), 'signup_code');
-      } catch (refErr) {
-        console.error('[partner] referral attach failed:', refErr);
-      }
-    }
 
     sendTemplateEmail('Registration', email, {
       user_name: name,
