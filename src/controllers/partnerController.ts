@@ -759,19 +759,21 @@ export const adminListPayouts = async (request: FastifyRequest, reply: FastifyRe
   }
 };
 
-/** PATCH /api/partners/payouts/:id { action: 'paid'|'reject', reference?, note? } */
+/** PATCH /api/partners/payouts/:id { action: 'paid'|'reject', reference?, note?, paymentMethod? } */
 export const adminProcessPayout = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const { id } = request.params as { id: string };
-    const b = (request.body || {}) as { action?: string; reference?: string; note?: string };
+    const b = (request.body || {}) as { action?: string; reference?: string; note?: string; paymentMethod?: string };
     const payout = isId(id) ? await PartnerPayoutModel.findById(id) : null;
     if (!payout) return reply.status(404).send({ success: false, error: 'Payout not found' });
     if (payout.status !== 'requested') return reply.status(400).send({ success: false, error: `Payout already ${payout.status}` });
     if (b.action === 'paid') {
-      if (!b.reference?.trim()) return reply.status(400).send({ success: false, error: 'Payment reference (UTR) is required' });
-      const partner = await PartnerModel.findById(payout.partnerId).select('pan').lean();
-      if (!isValidPan(partner?.pan)) return reply.status(400).send({ success: false, error: 'Partner has no valid PAN on file — payout blocked' });
-      // TDS is finalised at payment time against PAID payouts earlier in the same FY.
+      const method = (b.paymentMethod || payout.method || 'upi').toLowerCase();
+      const ref = b.reference?.trim() || (method === 'cash' ? 'Paid in Cash' : (method === 'phonepe' ? 'PhonePe Payment' : (method === 'gpay' ? 'Google Pay Payment' : '')));
+      if (!ref) return reply.status(400).send({ success: false, error: 'Payment reference / note is required' });
+      const partner = await PartnerModel.findById(payout.partnerId).select('pan phone upiId').lean();
+      
+      // TDS calculation if applicable
       const paidAt = new Date();
       const tds = await tdsForPartnerPayout(payout.partnerId as any, payout.amount, paidAt, String(payout._id));
       payout.tdsRate = tds.rate;
@@ -779,9 +781,17 @@ export const adminProcessPayout = async (request: FastifyRequest, reply: Fastify
       payout.netAmount = tds.netAmount;
       payout.financialYear = tds.financialYear;
       payout.tdsSection = tds.section;
-      payout.pan = partner!.pan;
+      payout.pan = partner?.pan || undefined;
+      payout.method = method;
+      if (method === 'cash') {
+        payout.destination = 'Cash (Hand-to-hand / Offline)';
+      } else if (method === 'phonepe') {
+        payout.destination = partner?.phone ? `PhonePe (${partner.phone})` : (partner?.upiId || payout.destination);
+      } else if (method === 'gpay') {
+        payout.destination = partner?.phone ? `Google Pay (${partner.phone})` : (partner?.upiId || payout.destination);
+      }
       payout.status = 'paid';
-      payout.reference = b.reference.trim();
+      payout.reference = ref;
       await PartnerCommissionModel.updateMany({ payoutId: payout._id, status: 'approved' }, { $set: { status: 'paid', paidAt: new Date() } });
     } else if (b.action === 'reject') {
       payout.status = 'rejected';
@@ -795,6 +805,95 @@ export const adminProcessPayout = async (request: FastifyRequest, reply: Fastify
     payout.processedAt = new Date();
     await payout.save();
     return reply.send({ success: true, data: payout });
+  } catch (error: any) {
+    return reply.status(500).send({ success: false, error: error.message });
+  }
+};
+
+/** POST /api/partners/payouts/direct { partnerId, reference?, note?, amount?, paymentMethod? } — owner pays partner directly at any time */
+export const adminCreateDirectPayout = async (request: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { partnerId, reference, note, amount, paymentMethod } = (request.body || {}) as {
+      partnerId: string;
+      reference?: string;
+      note?: string;
+      amount?: number;
+      paymentMethod?: string;
+    };
+
+    if (!isId(partnerId)) {
+      return reply.status(400).send({ success: false, error: 'Valid partner ID is required' });
+    }
+
+    const partner = await PartnerModel.findById(partnerId);
+    if (!partner) {
+      return reply.status(404).send({ success: false, error: 'Partner not found' });
+    }
+
+    const method = (paymentMethod || partner.payoutMethod || 'upi').toLowerCase();
+    const ref = reference?.trim() || (method === 'cash' ? 'Paid in Cash' : (method === 'phonepe' ? 'PhonePe Payment' : (method === 'gpay' ? 'Google Pay Payment' : 'Direct Payout')));
+
+    // Find all unpaid commissions for this partner (both approved and pending)
+    const unpaidCommissions = await PartnerCommissionModel.find({
+      partnerId: partner._id,
+      status: { $in: ['approved', 'pending'] },
+      payoutId: { $exists: false },
+    }).sort({ createdAt: 1 });
+
+    if (!unpaidCommissions.length && !amount) {
+      return reply.status(400).send({ success: false, error: 'Partner has no unpaid commissions to pay' });
+    }
+
+    const totalUnpaid = round2(unpaidCommissions.reduce((s, c) => s + c.amount, 0));
+    const payoutAmount = amount && amount > 0 ? round2(amount) : totalUnpaid;
+
+    const paidAt = new Date();
+    const tds = await tdsForPartnerPayout(partner._id as any, payoutAmount, paidAt);
+
+    let destination = maskDestination(partner.payoutMethod, partner.upiId, partner.bankAccountNumber);
+    if (method === 'cash') {
+      destination = 'Cash (Hand-to-hand / Offline)';
+    } else if (method === 'phonepe') {
+      destination = partner.phone ? `PhonePe (${partner.phone})` : (partner.upiId || destination);
+    } else if (method === 'gpay') {
+      destination = partner.phone ? `Google Pay (${partner.phone})` : (partner.upiId || destination);
+    } else if (method === 'paytm') {
+      destination = partner.phone ? `Paytm (${partner.phone})` : (partner.upiId || destination);
+    }
+
+    const payout = await PartnerPayoutModel.create({
+      partnerId: partner._id,
+      amount: payoutAmount,
+      tdsRate: tds.rate,
+      tdsAmount: tds.tdsAmount,
+      netAmount: tds.netAmount,
+      financialYear: tds.financialYear,
+      tdsSection: tds.section,
+      pan: partner.pan || undefined,
+      commissionIds: unpaidCommissions.map((c) => c._id),
+      clawbackDeducted: 0,
+      method,
+      destination,
+      status: 'paid',
+      reference: ref,
+      adminNote: note?.trim() || (method === 'cash' ? 'Paid in Cash by Owner' : `Paid via ${method.toUpperCase()} by Owner`),
+      processedAt: paidAt,
+      processedBy: uid(request) as any,
+    });
+
+    // Mark the commissions as paid
+    if (unpaidCommissions.length > 0) {
+      await PartnerCommissionModel.updateMany(
+        { _id: { $in: unpaidCommissions.map((c) => c._id) } },
+        { $set: { status: 'paid', payoutId: payout._id, paidAt } }
+      );
+    }
+
+    return reply.send({
+      success: true,
+      message: `Commission payout of ₹${payoutAmount} marked as paid via ${method.toUpperCase()} successfully`,
+      data: payout,
+    });
   } catch (error: any) {
     return reply.status(500).send({ success: false, error: error.message });
   }

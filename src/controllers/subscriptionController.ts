@@ -409,8 +409,9 @@ const publicQuote = (q: Awaited<ReturnType<typeof quotePartnerDiscount>>) => ({
   discountPercent: q.discountPercent,
   discountAmount: q.discountAmount,
   finalAmount: q.finalAmount,
-  code: q.discountAmount > 0 ? q.code : undefined,
-  source: q.discountAmount > 0 ? q.source : undefined,
+  code: q.code || undefined,
+  source: q.source || undefined,
+  partnerName: (q as any).partnerName || undefined,
   message: q.message,
 });
 
@@ -505,18 +506,19 @@ export const createRazorpayOrder = async (request: FastifyRequest, reply: Fastif
       });
     }
 
-    // Partner discount is computed here, server-side, and the charged amount is stored against the order id.
+    // Partner commission tracking: server quotes the pricing and links partner code
     const buyerId = String((request.user as any)?.id || (request.body as any).userId || '');
     const quote = buyerId
       ? await quotePartnerDiscount(buyerId, plan.totalPrice || 0, partnerCode)
-      : { listPrice: plan.totalPrice || 0, discountPercent: 0, discountAmount: 0, finalAmount: plan.totalPrice || 0, message: undefined } as any;
+      : (partnerCode ? await quotePartnerDiscount('', plan.totalPrice || 0, partnerCode) : { listPrice: plan.totalPrice || 0, discountPercent: 0, discountAmount: 0, finalAmount: plan.totalPrice || 0, message: undefined } as any);
     const chargedPaise = Math.round(quote.finalAmount * 100);
 
+    const effectivePartnerCode = quote.code || partnerCode;
     const order = await instance.orders.create({
       amount: chargedPaise,
       currency: settings.currencyCode || 'INR',
       receipt: `receipt_${Date.now()}`,
-      notes: quote.discountAmount > 0 ? { partnerCode: String(quote.code || ''), discountPercent: String(quote.discountPercent) } : undefined,
+      notes: effectivePartnerCode ? { partnerCode: String(effectivePartnerCode), discountPercent: String(quote.discountPercent || 0) } : undefined,
     } as any);
 
     if (buyerId) {
@@ -529,8 +531,8 @@ export const createRazorpayOrder = async (request: FastifyRequest, reply: Fastif
         discountAmount: quote.discountAmount,
         finalAmount: quote.finalAmount,
         partnerId: quote.partnerId || undefined,
-        code: quote.code || undefined,
-        source: quote.source || undefined,
+        code: effectivePartnerCode || undefined,
+        source: quote.source || (partnerCode ? 'checkout_code' : undefined),
       });
     }
 
@@ -646,6 +648,7 @@ export const verifyRazorpayPayment = async (request: FastifyRequest, reply: Fast
         discountAmount: partnerDiscount,
         discountPercent: quote?.discountPercent || 0,
         discountCode: quote?.code || codeToAttach || undefined,
+        partnerId: quote?.partnerId,
       });
     } catch (commissionErr) {
       console.error('[partner] commission record failed:', commissionErr);

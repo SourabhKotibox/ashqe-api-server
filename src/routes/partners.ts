@@ -24,6 +24,7 @@ import {
   adminReverseCommission,
   adminListPayouts,
   adminProcessPayout,
+  adminCreateDirectPayout,
   adminGetPartnerSettings,
   adminUpdatePartnerSettings,
   adminAttributeUser,
@@ -57,6 +58,7 @@ const partnerRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/partners/commissions', view, adminListCommissions);
   fastify.post('/partners/commissions/:id/reverse', edit, adminReverseCommission);
   fastify.get('/partners/payouts', view, adminListPayouts);
+  fastify.post('/partners/payouts/direct', edit, adminCreateDirectPayout);
   fastify.patch('/partners/payouts/:id', edit, adminProcessPayout);
   fastify.get('/partners/settings', view, adminGetPartnerSettings);
   fastify.get('/partners/tds-report', view, adminTdsReport);

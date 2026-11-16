@@ -14,8 +14,8 @@ export interface IPartnerPayout extends Document {
   financialYear: string; // e.g. 2026-27 (IST, Apr–Mar)
   pan?: string;
   tdsSection?: string;
-  method: 'upi' | 'bank';
-  destination: string; // masked UPI / account snapshot
+  method: string; // 'cash' | 'phonepe' | 'gpay' | 'paytm' | 'upi' | 'bank' | 'other'
+  destination: string; // masked UPI / account snapshot / Cash note
   status: PayoutStatus;
   reference?: string; // UTR / transaction reference entered by admin
   adminNote?: string;
@@ -37,7 +37,7 @@ const PartnerPayoutSchema = new Schema<IPartnerPayout>(
     financialYear: { type: String, index: true },
     pan: String,
     tdsSection: String,
-    method: { type: String, enum: ['upi', 'bank'], default: 'upi' },
+    method: { type: String, default: 'upi' },
     destination: String,
     status: { type: String, enum: ['requested', 'paid', 'rejected'], default: 'requested', index: true },
     reference: String,

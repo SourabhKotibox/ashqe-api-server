@@ -95,21 +95,39 @@ export async function recordCommissionForPayment(input: {
   discountAmount?: number;
   discountPercent?: number;
   discountCode?: string;
+  partnerId?: string | Types.ObjectId;
 }) {
   if (!input.paymentId || !(input.saleAmount > 0)) return { created: false, reason: 'no_payment' as const };
   const existing = await PartnerCommissionModel.findOne({ paymentId: input.paymentId }).lean();
   if (existing) return { created: false, reason: 'duplicate' as const, commission: existing };
 
-  const user = await UserModel.findById(input.userId).select('referredByPartnerId').lean();
-  if (!user?.referredByPartnerId) return { created: false, reason: 'not_referred' as const };
+  let user = await UserModel.findById(input.userId).select('referredByPartnerId referredBy').lean();
+  let partnerIdToUse: any = user?.referredByPartnerId || input.partnerId;
+
+  if (!partnerIdToUse && input.discountCode) {
+    const pByCode = await findActivePartnerByCode(input.discountCode);
+    if (pByCode) partnerIdToUse = pByCode._id;
+  }
+
+  if (!partnerIdToUse) return { created: false, reason: 'not_referred' as const };
 
   const [partner, settings] = await Promise.all([
-    PartnerModel.findById(user.referredByPartnerId).lean(),
+    PartnerModel.findById(partnerIdToUse).lean(),
     getPartnerProgramSettings(),
   ]);
   if (!settings.enabled) return { created: false, reason: 'program_disabled' as const };
   if (!partner || partner.status !== 'active') return { created: false, reason: 'partner_inactive' as const };
   if (String(partner.userId) === String(input.userId)) return { created: false, reason: 'self' as const };
+
+  // Ensure user is permanently attributed to this partner
+  if (!user?.referredByPartnerId && partner._id) {
+    await UserModel.findByIdAndUpdate(input.userId, {
+      referredBy: partner.code,
+      referredByPartnerId: partner._id,
+      referredAt: new Date(),
+      referralSource: 'checkout_code',
+    }).catch((e) => console.error('[recordCommissionForPayment] backfill referral attribution failed:', e));
+  }
 
   const previous = await PartnerCommissionModel.countDocuments({
     referredUserId: input.userId,
@@ -139,7 +157,7 @@ export async function recordCommissionForPayment(input: {
       listPrice: input.listPrice !== undefined ? round2(input.listPrice) : round2(input.saleAmount),
       discountAmount: round2(input.discountAmount || 0),
       discountPercent: input.discountPercent || 0,
-      discountCode: input.discountCode,
+      discountCode: input.discountCode || partner.code,
       baseAmount: calc.baseAmount,
       rate: calc.rate,
       amount: calc.amount,
@@ -288,7 +306,14 @@ export function applyBuyerDiscount(listPrice: number, percent: number) {
  * applies if the buyer isn't attributed yet. Never trusts a client price.
  */
 export async function quotePartnerDiscount(userId: string, listPrice: number, rawCode?: string) {
-  const none = (message?: string) => ({ ...applyBuyerDiscount(listPrice, 0), partnerId: undefined as any, code: undefined as string | undefined, source: undefined as 'attributed' | 'checkout_code' | undefined, message });
+  const none = (message?: string) => ({
+    ...applyBuyerDiscount(listPrice, 0),
+    partnerId: undefined as any,
+    partnerName: undefined as string | undefined,
+    code: undefined as string | undefined,
+    source: undefined as 'attributed' | 'checkout_code' | undefined,
+    message,
+  });
   const settings = await getPartnerProgramSettings();
   if (!settings.enabled) return none(rawCode ? 'Partner codes are not active right now' : undefined);
   const user = userId ? await UserModel.findById(userId).select('referredByPartnerId').lean() : null;
@@ -313,16 +338,32 @@ export async function quotePartnerDiscount(userId: string, listPrice: number, ra
     const { SubscriptionModel } = await import('../models/Subscription');
     const paidBefore = await SubscriptionModel.exists({ userId, paymentMethod: 'Razorpay', totalAmount: { $gt: 0 } });
     if (paidBefore) {
-      return { ...none('Partner discount applies to your first subscription only'), partnerId: partner._id, code: typedCode || partner.code, source };
+      return {
+        ...none(),
+        partnerId: partner._id,
+        partnerName: partner.displayName,
+        code: typedCode || partner.code,
+        source,
+        message: `Partner code applied: ${partner.code}${partner.displayName ? ` (Supporting ${partner.displayName})` : ''}`,
+      };
     }
   }
   const pct = effectiveDiscountPercent(partner, settings);
   const calc = applyBuyerDiscount(listPrice, pct);
-  let message: string | undefined = calc.discountAmount > 0 ? `${pct}% partner discount applied` : 'This partner code has no buyer discount';
+  let message: string | undefined = calc.discountAmount > 0
+    ? `${pct}% partner discount applied`
+    : `Partner code applied: ${partner.code}${partner.displayName ? ` (Supporting ${partner.displayName})` : ''}`;
   if (source === 'attributed' && typed && typed !== partner.code && typed !== partner.couponCode) {
-    message = `Your account is already linked to partner ${partner.code}; that discount is applied instead`;
+    message = `Your account is already linked to partner ${partner.code}; that code is active`;
   }
-  return { ...calc, partnerId: partner._id, code: typedCode || partner.couponCode || partner.code, source, message };
+  return {
+    ...calc,
+    partnerId: partner._id,
+    partnerName: partner.displayName,
+    code: typedCode || partner.couponCode || partner.code,
+    source,
+    message,
+  };
 }
 
 /* ───────────────────────────── TDS (s.393 / old 194H) ───────────────────────────── */
