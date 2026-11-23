@@ -3,6 +3,7 @@ import { webRequestDownload, webGetDownloads, webDeleteDownload } from '../contr
 import { SubscriptionPlanModel } from '../models/SubscriptionPlan';
 import { PlanLimitModel } from '../models/PlanLimit';
 import { SettingsModel } from '../models/Settings';
+import { limitsForTier, tierFromPlan } from '../lib/accountLimits';
 
 const webDownloadRoutes: FastifyPluginAsync = async (fastify) => {
   // Public: list active subscription plans — no auth required
@@ -22,6 +23,9 @@ const webDownloadRoutes: FastifyPluginAsync = async (fastify) => {
         success: true,
         data: plans.map((plan) => {
           const lim: any = limitsByPlan.get(plan._id.toString()) || {};
+          const tierCaps = limitsForTier(tierFromPlan(plan.name, plan.level));
+          const maxDevices = Number(lim.deviceLimitCount) >= 1 ? Number(lim.deviceLimitCount) : tierCaps.devices;
+          const maxProfiles = Number(lim.profileLimitCount) >= 1 ? Number(lim.profileLimitCount) : tierCaps.profiles;
           return {
             id: plan._id,
             name: plan.name,
@@ -36,7 +40,8 @@ const webDownloadRoutes: FastifyPluginAsync = async (fastify) => {
             limits: {
               ads: lim.ads ?? (plan.level <= 1),
               adFree: lim.ads === false || (plan.level >= 2 && lim.ads !== true),
-              maxDevices: lim.deviceLimitCount || (plan.level >= 3 ? 4 : plan.level >= 2 ? 2 : 1),
+              maxDevices,
+              maxProfiles,
               downloadEnabled: lim.downloadStatus ?? plan.level >= 2,
               maxResolution: lim.q4k ? '4K' : lim.q1080p ? '1080p' : lim.q720p ? '720p' : '480p',
               q480p: lim.q480p ?? true,

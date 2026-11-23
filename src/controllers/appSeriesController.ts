@@ -9,7 +9,7 @@ import { logger } from '../lib/logger';
 import { buildShareUrl } from '../lib/config';
 import { isS3Configured, getS3PublicUrl } from '../lib/s3';
 import { extractOptionalUser } from '../lib/jwtHelper';
-import { resolveEffectiveUserPlan } from '../lib/subscriptionAccess';
+import { resolvePlaybackAccess } from '../lib/subscriptionAccess';
 
 // Helper to convert relative URLs to absolute URLs
 const toAbsoluteUrl = (
@@ -40,12 +40,12 @@ const toAbsoluteUrl = (
 };
 
 // Helper: try to extract userId and plan from JWT without throwing
-const getOptionalUser = async (request: FastifyRequest): Promise<{ userId: string; userPlan: string } | null> => {
+const getOptionalUser = async (request: FastifyRequest): Promise<{ userId: string; userPlan: string; streamsAllowed: boolean } | null> => {
   const user = extractOptionalUser(request);
   if (!user?.userId) return null;
 
-  const userPlan = await resolveEffectiveUserPlan(user.userId);
-  return { userId: user.userId, userPlan };
+  const access = await resolvePlaybackAccess(user.userId, user.deviceId);
+  return { userId: user.userId, userPlan: access.userPlan, streamsAllowed: access.streamsAllowed };
 };
 
 export const getSeriesDetail = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -59,6 +59,7 @@ export const getSeriesDetail = async (request: FastifyRequest, reply: FastifyRep
     const userInfo = await getOptionalUser(request);
     const userId = userInfo?.userId || null;
     const userPlan = userInfo?.userPlan || 'free';
+    const streamsAllowed = userInfo?.streamsAllowed !== false;
 
     const series = await TVShowModel.findById(id)
       .populate('cast.actor', 'name image designation')
@@ -166,8 +167,8 @@ export const getSeriesDetail = async (request: FastifyRequest, reply: FastifyRep
         duration: ep.duration || null,
         durationFormatted: durationStr,
         isFree: ep.isFree,
-        videoUrl: toAbsoluteUrl(request, ep.hlsUrl || ep.sourceVideoUrl, s3Active, s3BaseUrl) || null,
-        hlsUrl: toAbsoluteUrl(request, ep.hlsUrl || ep.sourceVideoUrl, s3Active, s3BaseUrl) || null,
+        videoUrl: streamsAllowed ? (toAbsoluteUrl(request, ep.hlsUrl || ep.sourceVideoUrl, s3Active, s3BaseUrl) || null) : null,
+        hlsUrl: streamsAllowed ? (toAbsoluteUrl(request, ep.hlsUrl || ep.sourceVideoUrl, s3Active, s3BaseUrl) || null) : null,
       });
     }
 

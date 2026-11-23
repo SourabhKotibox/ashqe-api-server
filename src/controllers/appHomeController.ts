@@ -15,7 +15,7 @@ import {
   canAccessContent,
   isContentLocked,
   requiresSubscription,
-  resolveEffectiveUserPlan,
+  resolvePlaybackAccess,
 } from '../lib/subscriptionAccess';
 
 // Base URL for the backend API (used for smart share links)
@@ -39,10 +39,10 @@ const buildUrlResolver = (request: FastifyRequest) =>
 import { extractOptionalUser } from '../lib/jwtHelper';
 
 // Helper: try to extract userId from JWT (optional auth — no error if missing/invalid)
-const getAuthData = (request: FastifyRequest): { userId: string | null; profileId: string | null } => {
+const getAuthData = (request: FastifyRequest): { userId: string | null; profileId: string | null; deviceId: string | null } => {
   const user = extractOptionalUser(request);
   const profileId = (request.headers['x-profile-id'] as string) || null;
-  return { userId: user?.userId || null, profileId };
+  return { userId: user?.userId || null, profileId, deviceId: user?.deviceId || null };
 };
 
 // Helper function to map movie items — resolveUrl converts all image/video paths to full URLs
@@ -53,10 +53,11 @@ const mapContentItem = (
   isLikedByUser = false,
   userPlan = 'free',
   type: 'movie' | 'show' = 'movie',
+  streamsAllowed = true,
 ) => {
   const contentPlan = item.planRequired || item.plan || 'free';
   const locked = isContentLocked(contentPlan, userPlan);
-  const accessible = canAccessContent(contentPlan, userPlan);
+  const accessible = canAccessContent(contentPlan, userPlan) && streamsAllowed;
   return {
     id: item._id.toString(),
     title: item.title,
@@ -133,6 +134,7 @@ const mapBanner = (
   likeCount = 0,
   isLikedByUser = false,
   userPlan = 'free',
+  streamsAllowed = true,
 ) => {
   const content = banner.contentId;
   const thumbnail = resolveUrl(content?.thumbnail || banner.imageUrl);
@@ -147,7 +149,7 @@ const mapBanner = (
     ctaText: banner.ctaText,
     ctaLink: banner.ctaLink,
     contentId: banner.contentId?._id?.toString(),
-    content: content ? mapContentItem(content, resolveUrl, likeCount, isLikedByUser, userPlan, content.type === 'show' ? 'show' : 'movie') : undefined,
+    content: content ? mapContentItem(content, resolveUrl, likeCount, isLikedByUser, userPlan, content.type === 'show' ? 'show' : 'movie', streamsAllowed) : undefined,
     type: banner.type,
     contentType: banner.contentType,
     position: banner.position,
@@ -177,23 +179,25 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
 
     const requestedTab = query.tab || 'all';
 
-    const { userId, profileId } = getAuthData(request);
+    const { userId, profileId, deviceId } = getAuthData(request);
 
     // Build URL resolver (local storage)
     const resolveUrl = buildUrlResolver(request);
 
     // Resolve REAL active plan from Subscription collection (not stale JWT/user fields)
     let userPlan = 'free';
+    let streamsAllowed = true;
     // Get user's preferred language (defaulting to Hindi if skipped/not set)
     let preferredLanguage = 'Hindi';
     if (userId) {
-      const [plan, user] = await Promise.all([
-        resolveEffectiveUserPlan(userId),
+      const [access, user] = await Promise.all([
+        resolvePlaybackAccess(userId, deviceId),
         UserModel.findById(userId)
           .select('preferredLanguage languageSelectionSkipped')
           .lean(),
       ]);
-      userPlan = plan;
+      userPlan = access.userPlan;
+      streamsAllowed = access.streamsAllowed;
       if (user) {
         if (user.preferredLanguage) {
           preferredLanguage = user.preferredLanguage;
@@ -398,7 +402,7 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
         const cid = item._id.toString();
         const likeCount = item.likes || 0;
         const isLikedByUser = likedContentIdSet.has(cid);
-        return mapContentItem(item, resolveUrl, likeCount, isLikedByUser, userPlan, item._type || 'movie');
+        return mapContentItem(item, resolveUrl, likeCount, isLikedByUser, userPlan, item._type || 'movie', streamsAllowed);
       }),
     }));
 
@@ -437,7 +441,7 @@ export const getHomePage = async (request: FastifyRequest, reply: FastifyReply) 
         const likeCount = entry.item.likes || 0;
         const isLikedByUser = likedContentIdSet.has(cid);
 
-        const mapped: any = mapContentItem(entry.item, resolveUrl, likeCount, isLikedByUser, userPlan, entry.type);
+        const mapped: any = mapContentItem(entry.item, resolveUrl, likeCount, isLikedByUser, userPlan, entry.type, streamsAllowed);
         if (entry.episode) {
           mapped.episodeId = entry.episode._id.toString();
           mapped.episodeTitle = entry.episode.title;
@@ -529,10 +533,13 @@ export const getAppBanners = async (request: FastifyRequest, reply: FastifyReply
 
     const banners = await populateBannersContent(bannersRaw);
 
-    const { userId } = getAuthData(request);
+    const { userId, deviceId } = getAuthData(request);
     let userPlan = 'free';
+    let streamsAllowed = true;
     if (userId) {
-      userPlan = await resolveEffectiveUserPlan(userId);
+      const access = await resolvePlaybackAccess(userId, deviceId);
+      userPlan = access.userPlan;
+      streamsAllowed = access.streamsAllowed;
     }
     const allContentIds = banners
       .filter(b => b.contentId)
@@ -546,11 +553,11 @@ export const getAppBanners = async (request: FastifyRequest, reply: FastifyReply
     }
 
     const mappedBanners = banners.map(banner => {
-      if (!banner.contentId) return mapBanner(banner, resolveUrl, 0, false, userPlan);
+      if (!banner.contentId) return mapBanner(banner, resolveUrl, 0, false, userPlan, streamsAllowed);
       const cid = (banner.contentId as any)._id.toString();
       const likeCount = (banner.contentId as any).likes || 0;
       const isLikedByUser = likedContentIdSet.has(cid);
-      return mapBanner(banner, resolveUrl, likeCount, isLikedByUser, userPlan);
+      return mapBanner(banner, resolveUrl, likeCount, isLikedByUser, userPlan, streamsAllowed);
     });
 
     return reply.send({

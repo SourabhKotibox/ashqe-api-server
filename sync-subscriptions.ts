@@ -4,6 +4,7 @@
  */
 import 'dotenv/config';
 import mongoose from 'mongoose';
+import { pickCurrentSubscription } from './src/lib/accountLimits';
 
 const uri = process.env.MONGODB_URI!;
 
@@ -51,7 +52,26 @@ async function main() {
 
   console.log(`Active subscriptions: ${activeSubs.length}`);
 
+  const byUser = new Map<string, any[]>();
   for (const sub of activeSubs) {
+    const key = String(sub.userId);
+    const list = byUser.get(key) || [];
+    list.push(sub);
+    byUser.set(key, list);
+  }
+
+  for (const group of byUser.values()) {
+    const sub = pickCurrentSubscription(group);
+    if (!sub) continue;
+    for (const other of group) {
+      if (String(other._id) !== String(sub._id)) {
+        await db.collection('subscriptions').updateOne(
+          { _id: other._id },
+          { $set: { status: 'inactive', updatedAt: new Date() } }
+        );
+        console.log(`  retired older subscription ${other._id} for user ${sub.userId}`);
+      }
+    }
     // Fix absurd end dates from Monthly×30 bug ( > 2 years out )
     let endDate = sub.endDate ? new Date(sub.endDate) : null;
     const startDate = sub.startDate ? new Date(sub.startDate) : now;

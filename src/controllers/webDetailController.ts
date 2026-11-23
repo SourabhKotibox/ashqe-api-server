@@ -7,21 +7,24 @@ import {
   isContentLocked,
   isQualityLocked,
   requiresSubscription,
-  resolveEffectiveUserPlan,
+  resolvePlaybackAccess,
 } from '../lib/subscriptionAccess';
 import { QUALITY_PLAN_GATE } from './watchController';
 import { extractOptionalUser } from '../lib/jwtHelper';
 
-const getOptionalUserPlan = async (request: FastifyRequest): Promise<string> => {
+const getOptionalUserPlan = async (request: FastifyRequest): Promise<{ userPlan: string; streamsAllowed: boolean }> => {
   const user = extractOptionalUser(request);
-  if (!user?.userId) return 'free';
-  return await resolveEffectiveUserPlan(user.userId);
+  if (!user?.userId) return { userPlan: 'free', streamsAllowed: true };
+  const access = await resolvePlaybackAccess(user.userId, user.deviceId);
+  return { userPlan: access.userPlan, streamsAllowed: access.streamsAllowed };
 };
 
 export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const { contentId } = request.params as { contentId: string };
-    const userPlan = await getOptionalUserPlan(request);
+    const access = await getOptionalUserPlan(request);
+    const userPlan = access.userPlan;
+    const streamsAllowed = access.streamsAllowed;
 
     let isSeries = false;
     let item: any = await MovieModel.findById(contentId)
@@ -64,7 +67,7 @@ export const getWebDetail = async (request: FastifyRequest, reply: FastifyReply)
     const languageNames = (item.languages || []).map((l: any) => l?.name || l);
 
     const contentPlan = item.planRequired || 'free';
-    const contentAccessible = canAccessContent(contentPlan, userPlan);
+    const contentAccessible = canAccessContent(contentPlan, userPlan) && streamsAllowed;
 
     // Video settings — never use blob: browser preview URLs; hide streams when locked
     const rawHlsUrl =

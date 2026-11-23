@@ -3,8 +3,6 @@ import { UserModel } from '../models/User';
 import { AdminUserModel } from '../models/AdminUser';
 import { LanguageModel } from '../models/Language';
 import { SettingsModel } from '../models/Settings';
-import { SubscriptionPlanModel } from '../models/SubscriptionPlan';
-import { PlanLimitModel } from '../models/PlanLimit';
 import mongoose from 'mongoose';
 import { PageModel } from '../models/Page';
 import { UserDownloadModel } from '../models/UserDownload';
@@ -19,7 +17,14 @@ import { UserViewModel } from '../models/UserView';
 import { TransactionModel } from '../models/Transaction';
 import { logger } from '../lib/logger';
 import uploadHandler from '../lib/uploadHandler';
-import { resolveEffectiveUserPlan } from '../lib/subscriptionAccess';
+import { resolveAccountEntitlement } from '../lib/subscriptionAccess';
+import {
+  canCreateProfile,
+  profileLimitMessage,
+  publicLimitCount,
+  serializeDevice,
+  toDeviceRecords,
+} from '../lib/accountLimits';
 import { extractOptionalUser } from '../lib/jwtHelper';
 
 // Optional user lookup helper
@@ -102,20 +107,8 @@ export const getAppProfile = async (request: FastifyRequest, reply: FastifyReply
       }
       if (user) {
         // Prefer live Subscription records — heals User.subscription* to match real plan
-        const effectivePlan = await resolveEffectiveUserPlan(userObjectId);
-        const isActive = effectivePlan !== 'free';
-
-        // Reload healed subscription fields for response expiry / plan id
-        const refreshed = await UserModel.findById(userObjectId)
-          .select('subscriptionPlan subscriptionStatus subscriptionExpiry subscriptionPlanId subscriptionPlanName')
-          .lean();
-        if (refreshed) {
-          (user as any).subscriptionPlan = refreshed.subscriptionPlan;
-          (user as any).subscriptionStatus = refreshed.subscriptionStatus;
-          (user as any).subscriptionExpiry = refreshed.subscriptionExpiry;
-          (user as any).subscriptionPlanId = refreshed.subscriptionPlanId;
-          (user as any).subscriptionPlanName = refreshed.subscriptionPlanName;
-        }
+        const entitlement = await resolveAccountEntitlement(userObjectId);
+        const isActive = entitlement.active && entitlement.planKey !== 'free';
 
         // Calculate user sequential number and dynamically format Display ID
         const userNumber = await UserModel.countDocuments({ _id: { $lte: user._id } });
@@ -124,22 +117,7 @@ export const getAppProfile = async (request: FastifyRequest, reply: FastifyReply
         const prefix = appName.substring(0, 4).toUpperCase();
         const displayId = `${prefix}${String(userNumber).padStart(4, '0')}`;
 
-        // Look up plan by ID first (most reliable), fallback to name
-        const plan = (user as any).subscriptionPlanId
-          ? await SubscriptionPlanModel.findById((user as any).subscriptionPlanId).lean()
-          : await SubscriptionPlanModel.findOne({
-              $or: [
-                { name: (user as any).subscriptionPlanName || effectivePlan },
-                { name: new RegExp(`^${String(effectivePlan || 'free').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') },
-              ],
-            }).lean();
-        let profileLimitCount = 1;
-        if (plan) {
-          const limit = await PlanLimitModel.findOne({ planId: plan._id }).lean();
-          if (limit) {
-            profileLimitCount = limit.profileLimitCount;
-          }
-        }
+        const profileLimitCount = publicLimitCount(entitlement.profileLimitCount);
 
         userProfile = {
           id: user._id.toString(),
@@ -150,11 +128,12 @@ export const getAppProfile = async (request: FastifyRequest, reply: FastifyReply
           avatar: (user as any).avatar || null,
           subscription: isActive,
           subscriptionStatus: isActive ? 'active' : 'inactive',
-          subscriptionPlan: isActive ? ((user as any).subscriptionPlanName || effectivePlan) : 'free', // Use actual plan name if available, fallback to tier
-          subscriptionPlanId: (user as any).subscriptionPlanId || null,
-          subscriptionPlanName: (user as any).subscriptionPlanName || null, // Return actual plan name from admin panel
-          subscriptionExpiry: (user as any).subscriptionExpiry || null,
+          subscriptionPlan: isActive ? entitlement.planName : 'free',
+          subscriptionPlanId: isActive ? entitlement.planId : null,
+          subscriptionPlanName: isActive ? entitlement.planName : null,
+          subscriptionExpiry: entitlement.expiry,
           profileLimitCount,
+          deviceLimitCount: publicLimitCount(entitlement.deviceLimitCount),
           videoQuality: user.videoQuality || 'auto',
           preferredLanguage: user.preferredLanguage || 'Hindi',
           accessToken: getOptionalUserToken(request) || null,
@@ -821,8 +800,13 @@ export const getDevices = async (request: FastifyRequest, reply: FastifyReply) =
     const user = await UserModel.findById(userId).select('devices').lean();
     if (!user) return reply.status(404).send({ success: false, message: 'User not found' });
 
-    const devices = (user as any).devices || [];
-    return reply.send({ success: true, data: devices });
+    const entitlement = await resolveAccountEntitlement(userId);
+    const devices = toDeviceRecords((user as any).devices).map(serializeDevice);
+    return reply.send({
+      success: true,
+      data: devices,
+      deviceLimitCount: publicLimitCount(entitlement.deviceLimitCount),
+    });
   } catch (error: any) {
     logger.error({ error }, 'Error fetching devices');
     return reply.status(500).send({ success: false, message: 'Failed to fetch devices' });
@@ -857,7 +841,14 @@ export const getProfiles = async (request: FastifyRequest, reply: FastifyReply) 
     const user = await UserModel.findById(userId).select('profiles').lean();
     if (!user) return reply.status(404).send({ success: false, message: 'User not found' });
 
-    return reply.send({ success: true, data: user.profiles || [] });
+    const entitlement = await resolveAccountEntitlement(userId);
+    const profiles = user.profiles || [];
+    return reply.send({
+      success: true,
+      data: profiles,
+      profileLimitCount: publicLimitCount(entitlement.profileLimitCount),
+      profilesUsed: profiles.length,
+    });
   } catch (error: any) {
     logger.error({ error }, 'Error fetching profiles');
     return reply.status(500).send({ success: false, message: 'Failed to fetch profiles' });
@@ -876,33 +867,17 @@ export const createProfile = async (request: FastifyRequest, reply: FastifyReply
     const user = await UserModel.findById(userId);
     if (!user) return reply.status(404).send({ success: false, message: 'User not found' });
 
-    // Enforce limits — look up plan by ID first (most reliable), fallback to name
-    let profileLimitCount = 1;
-    const isActive = user.subscriptionStatus === 'active' &&
-                     (!user.subscriptionExpiry || user.subscriptionExpiry > new Date());
-
-    if (isActive && user.subscriptionPlan !== 'free') {
-      const planDoc = (user as any).subscriptionPlanId
-        ? await SubscriptionPlanModel.findById((user as any).subscriptionPlanId).lean()
-        : await SubscriptionPlanModel.findOne({
-            $or: [
-              { name: (user as any).subscriptionPlanName || user.subscriptionPlan },
-              { name: new RegExp(`^${user.subscriptionPlan}$`, 'i') },
-            ],
-          }).lean();
-      if (planDoc) {
-        const limit = await PlanLimitModel.findOne({ planId: planDoc._id }).lean();
-        if (limit) profileLimitCount = limit.profileLimitCount;
-      } else {
-        // Fallback for active users if plan is not found by name or ID
-        profileLimitCount = 4;
-      }
-    } else if (isActive) {
-      profileLimitCount = 4;
-    }
-
-    if ((user as any).profiles.length >= profileLimitCount) {
-      return reply.status(403).send({ success: false, message: `Profile limit of ${profileLimitCount} reached on your current plan.` });
+    // The request body may include a client-supplied plan. The account's live
+    // subscription is the only source of the cap.
+    const entitlement = await resolveAccountEntitlement(userId);
+    const profileLimitCount = publicLimitCount(entitlement.profileLimitCount);
+    if (!canCreateProfile((user as any).profiles.length, entitlement.profileLimitCount)) {
+      return reply.status(403).send({
+        success: false,
+        message: profileLimitMessage(profileLimitCount),
+        code: 'PROFILE_LIMIT_REACHED',
+        profileLimitCount,
+      });
     }
 
     const newProfile = {

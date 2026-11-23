@@ -12,7 +12,16 @@
 
 import mongoose from 'mongoose';
 import { SubscriptionModel } from '../models/Subscription';
+import { SubscriptionPlanModel } from '../models/SubscriptionPlan';
+import { PlanLimitModel } from '../models/PlanLimit';
 import { UserModel } from '../models/User';
+import {
+  isDeviceAllowedToStream,
+  pickCurrentSubscription,
+  resolveLimitCounts,
+  tierFromPlan,
+  type PlanTier,
+} from './accountLimits';
 
 export const PLAN_LEVELS: Record<string, number> = {
   free: 0,
@@ -21,15 +30,9 @@ export const PLAN_LEVELS: Record<string, number> = {
   premium: 3,
 };
 
-/** Align with subscriptionController.normalizePlanKey */
+/** Align with subscriptionController.normalizePlanKey and tierFromPlan. */
 export function normalizePlan(plan: unknown): string {
-  const p = String(plan || 'free').toLowerCase().trim();
-  if (!p || p === 'free') return 'free';
-  if (p.includes('premium') || p.includes('vip')) return 'premium';
-  if (p.includes('standard')) return 'standard';
-  if (p.includes('basic')) return 'basic';
-  // Named paid plans (e.g. "Gold") → standard tier access
-  return 'standard';
+  return tierFromPlan(plan == null ? 'free' : String(plan));
 }
 
 /** True when content requires a paid subscription to play. */
@@ -66,69 +69,197 @@ export function effectiveUserPlan(user: {
   return plan === 'free' ? 'free' : plan;
 }
 
+export interface AccountEntitlement {
+  planKey: PlanTier;
+  planName: string;
+  planId: string | null;
+  active: boolean;
+  expiry: Date | null;
+  deviceLimitCount: number;
+  profileLimitCount: number;
+  devices: any[];
+}
+
+const FREE_ENTITLEMENT: AccountEntitlement = {
+  planKey: 'free',
+  planName: 'Free',
+  planId: null,
+  active: false,
+  expiry: null,
+  deviceLimitCount: 1,
+  profileLimitCount: 1,
+  devices: [],
+};
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
- * Resolve the user's REAL active plan from Subscription collection,
- * then fall back to User fields. Heals stale User.subscription* when live sub exists.
+ * Active plan for devices, profiles, and playback.
+ * Live Subscription rows win. The newest purchase wins over an older plan
+ * that ends later (upgrade and downgrade). User fields are only a fallback
+ * when no live row exists and they are still unexpired.
  */
-export async function resolveEffectiveUserPlan(
+export async function resolveAccountEntitlement(
   userId: string | mongoose.Types.ObjectId | null | undefined
-): Promise<string> {
-  if (!userId || !mongoose.Types.ObjectId.isValid(String(userId))) return 'free';
+): Promise<AccountEntitlement> {
+  if (!userId || !mongoose.Types.ObjectId.isValid(String(userId))) {
+    return { ...FREE_ENTITLEMENT, devices: [] };
+  }
 
   const oid = new mongoose.Types.ObjectId(String(userId));
   const now = new Date();
 
-  const liveSub = await SubscriptionModel.findOne({
+  await SubscriptionModel.updateMany(
+    { userId: oid, status: 'active', endDate: { $lt: now } },
+    { $set: { status: 'inactive' } }
+  );
+
+  const subs = await SubscriptionModel.find({
     userId: oid,
     status: 'active',
     $or: [{ endDate: { $gte: now } }, { endDate: null }, { endDate: { $exists: false } }],
   })
-    .sort({ endDate: -1 })
+    .sort({ createdAt: -1, startDate: -1 })
     .lean();
 
-  if (liveSub) {
-    let planKey = normalizePlan(liveSub.plan);
+  const user = await UserModel.findById(oid)
+    .select('devices subscriptionPlan subscriptionStatus subscriptionExpiry subscriptionPlanId subscriptionPlanName')
+    .lean();
+  const devices = Array.isArray((user as any)?.devices) ? (user as any).devices : [];
+  const liveSub = pickCurrentSubscription(subs, now);
 
-    // If liveSub points to a SubscriptionPlan, check its configured level (1, 2, 3)
-    if (liveSub.planId) {
-      try {
-        const { SubscriptionPlanModel } = await import('../models/SubscriptionPlan');
-        const planDoc = await SubscriptionPlanModel.findById(liveSub.planId).lean();
-        if (planDoc && typeof planDoc.level === 'number') {
-          if (planDoc.level >= 3) planKey = 'premium';
-          else if (planDoc.level === 2 && planKey === 'free') planKey = 'standard';
-          else if (planDoc.level === 1 && planKey === 'free') planKey = 'basic';
+  if (liveSub) {
+    const planDoc = liveSub.planId
+      ? await SubscriptionPlanModel.findById(liveSub.planId).lean()
+      : null;
+    const planKey = tierFromPlan(planDoc?.name || liveSub.plan, planDoc?.level);
+    if (planKey !== 'free') {
+      const limitDoc = planDoc
+        ? await PlanLimitModel.findOne({ planId: planDoc._id }).lean()
+        : null;
+      const limits = resolveLimitCounts(planKey, limitDoc);
+      const planName = planDoc?.name || liveSub.plan || planKey;
+      const expiry = liveSub.endDate ? new Date(liveSub.endDate) : null;
+      const planId = liveSub.planId ? String(liveSub.planId) : null;
+
+      const unchanged =
+        user &&
+        user.subscriptionStatus === 'active' &&
+        String(user.subscriptionPlan || '') === planKey &&
+        String(user.subscriptionPlanName || '') === String(planName) &&
+        String(user.subscriptionPlanId || '') === String(planId || '') &&
+        ((expiry == null && !user.subscriptionExpiry) ||
+          (!!expiry &&
+            !!user.subscriptionExpiry &&
+            new Date(user.subscriptionExpiry).getTime() === expiry.getTime()));
+
+      if (!unchanged) {
+        try {
+          await UserModel.findByIdAndUpdate(oid, {
+            $set: {
+              subscriptionPlan: planKey,
+              subscriptionStatus: 'active',
+              subscriptionExpiry: expiry,
+              subscriptionPlanId: liveSub.planId || null,
+              subscriptionPlanName: planName,
+            },
+          });
+        } catch {
+          // Non-fatal — still return the live plan for this request
         }
-      } catch {
-        // Fallback to name-based normalization
+      }
+
+      return {
+        planKey,
+        planName,
+        planId,
+        active: true,
+        expiry,
+        deviceLimitCount: limits.deviceLimitCount,
+        profileLimitCount: limits.profileLimitCount,
+        devices,
+      };
+    }
+  }
+
+  const legacyKey = effectiveUserPlan(user);
+  if (legacyKey !== 'free' && user) {
+    let planDoc = null;
+    if (user.subscriptionPlanId && mongoose.Types.ObjectId.isValid(String(user.subscriptionPlanId))) {
+      planDoc = await SubscriptionPlanModel.findById(user.subscriptionPlanId).lean();
+    }
+    if (!planDoc) {
+      const name = user.subscriptionPlanName || user.subscriptionPlan;
+      if (name && String(name).toLowerCase() !== 'free') {
+        planDoc = await SubscriptionPlanModel.findOne({
+          name: new RegExp(`^${escapeRegex(String(name))}$`, 'i'),
+        }).lean();
       }
     }
+    const planKey = (planDoc ? tierFromPlan(planDoc.name, planDoc.level) : legacyKey) as PlanTier;
+    if (planKey !== 'free') {
+      const limitDoc = planDoc ? await PlanLimitModel.findOne({ planId: planDoc._id }).lean() : null;
+      const limits = resolveLimitCounts(planKey, limitDoc);
+      const planName = planDoc?.name || user.subscriptionPlanName || planKey;
+      return {
+        planKey,
+        planName,
+        planId: planDoc ? String(planDoc._id) : user.subscriptionPlanId ? String(user.subscriptionPlanId) : null,
+        active: true,
+        expiry: user.subscriptionExpiry ? new Date(user.subscriptionExpiry) : null,
+        deviceLimitCount: limits.deviceLimitCount,
+        profileLimitCount: limits.profileLimitCount,
+        devices,
+      };
+    }
+  }
 
-    if (planKey === 'free') return 'free';
-
-    // Keep User document in sync with the live subscription row
+  const storedPaid =
+    user &&
+    String(user.subscriptionStatus || '').toLowerCase() === 'active' &&
+    normalizePlan(user.subscriptionPlan) !== 'free';
+  if (storedPaid) {
     try {
       await UserModel.findByIdAndUpdate(oid, {
         $set: {
-          subscriptionPlan: planKey,
-          subscriptionStatus: 'active',
-          subscriptionExpiry: liveSub.endDate || null,
-          subscriptionPlanId: liveSub.planId || null,
-          subscriptionPlanName: liveSub.plan || null, // Sync actual plan name from admin panel
+          subscriptionPlan: 'free',
+          subscriptionStatus: 'inactive',
+          subscriptionPlanId: null,
+          subscriptionPlanName: null,
         },
       });
     } catch {
-      // Non-fatal — still return the live plan for this request
+      // Non-fatal
     }
-
-    return planKey;
   }
 
-  // No live Subscription row — use User fields (legacy / admin-set)
-  const user = await UserModel.findById(oid)
-    .select('subscriptionPlan subscriptionStatus subscriptionExpiry')
-    .lean();
-  return effectiveUserPlan(user);
+  return { ...FREE_ENTITLEMENT, devices };
+}
+
+/**
+ * Resolve the user's REAL active plan from Subscription collection,
+ * then fall back to User fields. Heals stale User.subscription* when a live sub exists.
+ */
+export async function resolveEffectiveUserPlan(
+  userId: string | mongoose.Types.ObjectId | null | undefined
+): Promise<string> {
+  const entitlement = await resolveAccountEntitlement(userId);
+  return entitlement.planKey;
+}
+
+/** Playback gate: plan tier plus whether this token's device may stream. */
+export async function resolvePlaybackAccess(
+  userId: string | mongoose.Types.ObjectId | null | undefined,
+  deviceId?: string | null
+): Promise<{ userPlan: string; streamsAllowed: boolean; entitlement: AccountEntitlement }> {
+  const entitlement = await resolveAccountEntitlement(userId);
+  return {
+    userPlan: entitlement.planKey,
+    streamsAllowed: isDeviceAllowedToStream(entitlement.devices, deviceId, entitlement.deviceLimitCount),
+    entitlement,
+  };
 }
 
 /**

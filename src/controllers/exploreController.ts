@@ -8,7 +8,7 @@ import { logger } from '../lib/logger';
 import {
   canAccessContent,
   isContentLocked,
-  resolveEffectiveUserPlan,
+  resolvePlaybackAccess,
 } from '../lib/subscriptionAccess';
 
 // How many extra items to fetch per page to survive deduplication filtering
@@ -17,8 +17,9 @@ import { extractOptionalUser } from '../lib/jwtHelper';
 const FETCH_MULTIPLIER = 4;
 
 // Helper: try to extract userId from JWT (optional auth — no error if missing/invalid)
-const getOptionalUserId = (request: FastifyRequest): string | null => {
-  return extractOptionalUser(request)?.userId || null;
+const getOptionalUserId = (request: FastifyRequest): { userId: string | null; deviceId: string | null } => {
+  const user = extractOptionalUser(request);
+  return { userId: user?.userId || null, deviceId: user?.deviceId || null };
 };
 
 import { buildShareUrl } from '../lib/config';
@@ -45,10 +46,11 @@ const mapContentItem = (
   isLikedByUser = false,
   userPlan = 'free',
   type: 'movie' | 'show' = 'movie',
+  streamsAllowed = true,
 ) => {
   const contentPlan = item.planRequired || item.plan || 'free';
   const locked = isContentLocked(contentPlan, userPlan);
-  const accessible = canAccessContent(contentPlan, userPlan);
+  const accessible = canAccessContent(contentPlan, userPlan) && streamsAllowed;
   return {
     id: item._id.toString(),
     title: item.title,
@@ -104,10 +106,14 @@ export const getExplore = async (request: FastifyRequest, reply: FastifyReply) =
       : [];
 
     // Optional auth — used for isLikedByUser + lock gating
-    const userId = getOptionalUserId(request);
+    const auth = getOptionalUserId(request);
+    const userId = auth.userId;
     let userPlan = 'free';
+    let streamsAllowed = true;
     if (userId) {
-      userPlan = await resolveEffectiveUserPlan(userId);
+      const access = await resolvePlaybackAccess(userId, auth.deviceId);
+      userPlan = access.userPlan;
+      streamsAllowed = access.streamsAllowed;
     }
 
     let sortBy: any = {};
@@ -254,7 +260,7 @@ export const getExplore = async (request: FastifyRequest, reply: FastifyReply) =
       const cid = content._id.toString();
       const likeCount: number = content.likes || 0;
       const isLikedByUser: boolean = likedContentIdSet.has(cid);
-      return mapContentItem(request, content, likeCount, isLikedByUser, userPlan, content._type || 'movie');
+      return mapContentItem(request, content, likeCount, isLikedByUser, userPlan, content._type || 'movie', streamsAllowed);
     });
 
     // nextOffset moves forward by the full raw fetch batch size (not just unique count)
