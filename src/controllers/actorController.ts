@@ -165,7 +165,7 @@ export const updateActor = async (request: FastifyRequest, reply: FastifyReply) 
     if (data.status !== undefined) updateData.status = asBool(data.status, existingActor.status);
 
     if (data.image && existingActor.image && data.image !== existingActor.image) {
-      uploadHandler.deleteUploadedFile(existingActor.image);
+      await uploadHandler.deleteUploadedFile(existingActor.image, undefined, { ignoreIds: [actorId] });
     }
 
     const actor = await ActorModel.findByIdAndUpdate(actorId, { $set: updateData }, { new: true, runValidators: true }).lean();
@@ -183,7 +183,7 @@ export const deleteActor = async (request: FastifyRequest, reply: FastifyReply) 
     if (denyUnlessCatalogOwner(request, reply, existing)) return;
     const actor = await ActorModel.findByIdAndDelete(actorId);
     if (!actor) return reply.status(404).send({ success: false, error: 'Actor not found' });
-    if (actor.image) uploadHandler.deleteUploadedFile(actor.image);
+    if (actor.image) await uploadHandler.deleteUploadedFile(actor.image);
     return reply.send({ success: true, message: 'Actor deleted successfully' });
   } catch (error: any) {
     return reply.status(500).send({ success: false, error: error.message });
@@ -199,9 +199,9 @@ export const bulkDeleteActors = async (request: FastifyRequest, reply: FastifyRe
     if (await denyBulkUnlessOwned(request, reply, ActorModel, ids)) return;
 
     const actors = await ActorModel.find({ _id: { $in: ids } });
-    actors.forEach((actor) => {
-      if (actor.image) uploadHandler.deleteUploadedFile(actor.image);
-    });
+    for (const actor of actors) {
+      if (actor.image) await uploadHandler.deleteUploadedFile(actor.image, undefined, { ignoreIds: ids });
+    }
     const result = await ActorModel.deleteMany({ _id: { $in: ids } });
     return {
       success: true,

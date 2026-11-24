@@ -190,7 +190,7 @@ export const updateLanguage = async (request: FastifyRequest, reply: FastifyRepl
     if (duplicate) return sendDuplicate(reply, duplicate, 'language');
 
     if (data.image && existingLang.image && data.image !== existingLang.image) {
-      uploadHandler.deleteUploadedFile(existingLang.image);
+      await uploadHandler.deleteUploadedFile(existingLang.image, undefined, { ignoreIds: [id] });
     }
 
     const language = await LanguageModel.findByIdAndUpdate(id, { $set: updateData }, { new: true }).lean();
@@ -211,7 +211,7 @@ export const deleteLanguage = async (request: FastifyRequest, reply: FastifyRepl
     }
     if (denyUnlessCatalogOwner(request, reply, language)) return;
 
-    if (language.image) uploadHandler.deleteUploadedFile(language.image);
+    if (language.image) await uploadHandler.deleteUploadedFile(language.image, undefined, { ignoreIds: [id] });
     await LanguageModel.findByIdAndDelete(id);
     return reply.status(200).send({ success: true, message: 'Language deleted successfully' });
   } catch (error) {

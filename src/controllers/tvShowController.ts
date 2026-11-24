@@ -16,6 +16,7 @@ import {
   tvShowNotReadyReason,
 } from '../lib/creatorAccess';
 import { normalizeContentReferences } from '../lib/contentReferences';
+import { releaseDocumentMedia } from '../lib/uploadHandler';
 
 const syncSections = async (contentIdStr: string, sections: string[] | undefined) => {
   await SectionModel.updateMany(
@@ -490,13 +491,15 @@ export const deleteTVShow = async (request: FastifyRequest, reply: FastifyReply)
     const { id } = request.params as { id: string };
 
     const tvShow = await TVShowModel.findOneAndDelete({ _id: id, ...ownershipClause(request) });
-    if (tvShow) await EpisodeModel.deleteMany({ tvShowId: id });
-
     if (!tvShow) {
       return reply.status(404).send({ success: false, error: 'TVShow not found' });
     }
+    const episodes = await EpisodeModel.find({ tvShowId: id }).lean();
+    await EpisodeModel.deleteMany({ tvShowId: id });
 
     await syncSections(id, []);
+    await releaseDocumentMedia(tvShow);
+    for (const episode of episodes) await releaseDocumentMedia(episode);
 
     return reply.send({ success: true, message: 'TVShow deleted successfully' });
   } catch (error: any) {

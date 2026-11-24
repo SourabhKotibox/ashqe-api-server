@@ -529,7 +529,7 @@ export const bulkDeleteBanners = async (request: FastifyRequest, reply: FastifyR
 
     for (const banner of banners) {
       if (banner.imageUrl) {
-        await uploadHandler.deleteUploadedFile(banner.imageUrl);
+        await uploadHandler.deleteUploadedFile(banner.imageUrl, undefined, { ignoreIds: ids });
       }
     }
 

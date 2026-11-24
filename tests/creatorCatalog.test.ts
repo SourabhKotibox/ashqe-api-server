@@ -346,7 +346,7 @@ describe('Creator catalog access', { concurrency: 1, timeout: 180000 }, () => {
     const fileId = uploadedBody.data[0].mediaFileId;
     const readable = await bodyOf(await call('GET', `/api/media/files/${fileId}`, creatorToken));
     assert.equal(String(readable.data.createdBy), creatorId);
-    assert.equal((await call('DELETE', `/api/media/files/${fileId}`, creatorToken)).statusCode, 403);
+    assert.equal((await call('DELETE', `/api/media/files/${fileId}`, creatorToken)).statusCode, 200);
     assert.equal((await call('GET', `/api/media/files/${fileId}`, otherToken)).statusCode, 404);
 
     const actor = await call('POST', '/api/actors', creatorToken, { name: 'Portrait Actor', image: portraitUrl });

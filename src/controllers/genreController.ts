@@ -171,7 +171,7 @@ export const updateGenre = async (request: FastifyRequest, reply: FastifyReply) 
     if (data.active !== undefined) data.active = asBool(data.active, existingGenre.active);
 
     if (data.image && existingGenre.image && data.image !== existingGenre.image) {
-      uploadHandler.deleteUploadedFile(existingGenre.image);
+      await uploadHandler.deleteUploadedFile(existingGenre.image, undefined, { ignoreIds: [genreId] });
     }
 
     const genre = await GenreModel.findByIdAndUpdate(
@@ -201,7 +201,7 @@ export const deleteGenre = async (request: FastifyRequest, reply: FastifyReply) 
     }
 
     if (genre.image) {
-      uploadHandler.deleteUploadedFile(genre.image);
+      await uploadHandler.deleteUploadedFile(genre.image);
     }
 
     return reply.send({
@@ -226,7 +226,7 @@ export const bulkDeleteGenres = async (request: FastifyRequest, reply: FastifyRe
     
     for (const genre of genres) {
       if (genre.image) {
-        uploadHandler.deleteUploadedFile(genre.image);
+        await uploadHandler.deleteUploadedFile(genre.image, undefined, { ignoreIds: ids });
       }
     }
 

@@ -159,7 +159,7 @@ export const updateDirector = async (request: FastifyRequest, reply: FastifyRepl
     if (data.status !== undefined) updateData.status = asBool(data.status, existingDirector.status);
 
     if (data.image && existingDirector.image && data.image !== existingDirector.image) {
-      uploadHandler.deleteUploadedFile(existingDirector.image);
+      await uploadHandler.deleteUploadedFile(existingDirector.image, undefined, { ignoreIds: [directorId] });
     }
 
     const director = await DirectorModel.findByIdAndUpdate(
@@ -181,7 +181,7 @@ export const deleteDirector = async (request: FastifyRequest, reply: FastifyRepl
     if (denyUnlessCatalogOwner(request, reply, existing)) return;
     const director = await DirectorModel.findByIdAndDelete(directorId);
     if (!director) return reply.status(404).send({ success: false, error: 'Director not found' });
-    if (director.image) uploadHandler.deleteUploadedFile(director.image);
+    if (director.image) await uploadHandler.deleteUploadedFile(director.image);
     return reply.send({ success: true, message: 'Director deleted successfully' });
   } catch (error: any) {
     return reply.status(500).send({ success: false, error: error.message });
@@ -197,9 +197,9 @@ export const bulkDeleteDirectors = async (request: FastifyRequest, reply: Fastif
     if (await denyBulkUnlessOwned(request, reply, DirectorModel, ids)) return;
 
     const directors = await DirectorModel.find({ _id: { $in: ids } });
-    directors.forEach((director) => {
-      if (director.image) uploadHandler.deleteUploadedFile(director.image);
-    });
+    for (const director of directors) {
+      if (director.image) await uploadHandler.deleteUploadedFile(director.image, undefined, { ignoreIds: ids });
+    }
     const result = await DirectorModel.deleteMany({ _id: { $in: ids } });
     return {
       success: true,

@@ -15,6 +15,7 @@ import {
   ownershipClause,
 } from '../lib/creatorAccess';
 import { normalizeContentReferences } from '../lib/contentReferences';
+import { releaseDocumentMedia } from '../lib/uploadHandler';
 
 const syncSections = async (contentIdStr: string, sections: string[] | undefined) => {
   await SectionModel.updateMany(
@@ -494,6 +495,7 @@ export const deleteMovie = async (request: FastifyRequest, reply: FastifyReply) 
     }
 
     await syncSections(id, []);
+    await releaseDocumentMedia(movie);
 
     return reply.send({ success: true, message: 'Movie deleted successfully' });
   } catch (error: any) {

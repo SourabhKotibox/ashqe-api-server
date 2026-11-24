@@ -1,4 +1,4 @@
-import { requirePermission } from '../middlewares/rbac';
+import { requireAnyPermission, requirePermission } from '../middlewares/rbac';
 import type { FastifyPluginAsync } from 'fastify';
 import {
   getFolders,
@@ -33,7 +33,12 @@ const media: FastifyPluginAsync = async (fastify) => {
   fastify.post('/folders/:id/files', { onRequest: [requirePermission('mediaLibrary', 'canUpload')] }, uploadFilesToFolder);
   fastify.post('/presign', { onRequest: [requirePermission('mediaLibrary', 'canUpload')] }, presignMediaUpload);
   fastify.post('/confirm-s3', { onRequest: [requirePermission('mediaLibrary', 'canUpload')] }, confirmS3MediaUpload);
-  fastify.delete('/files/:id', { onRequest: [requirePermission('mediaLibrary', 'canDelete')] }, deleteFile);
+  // Creators upload with canUpload and may delete only their own unreferenced files.
+  // Staff with canDelete can delete any unreferenced file. The handler enforces both.
+  fastify.delete('/files/:id', { onRequest: [requireAnyPermission([
+    ['mediaLibrary', 'canDelete'],
+    ['mediaLibrary', 'canUpload'],
+  ])] }, deleteFile);
 };
 
 export default media;
