@@ -4,6 +4,17 @@ import { EpisodeModel } from '../models/Episode';
 import { SectionModel } from '../models/Section';
 import { logger } from '../lib/logger';
 import { sendApprovalEmail, sendRejectionEmail } from '../lib/email';
+import {
+  assignCreatedBy,
+  blockInfluencerEditorial,
+  denyInfluencerModerationAction,
+  enforceCreatorSubmissionQuota,
+  isInfluencerRequest,
+  notifyAdminsOfSubmission,
+  notifyIfNewlyPublished,
+  ownershipClause,
+  tvShowNotReadyReason,
+} from '../lib/creatorAccess';
 
 const syncSections = async (contentIdStr: string, sections: string[] | undefined) => {
   await SectionModel.updateMany(
@@ -56,6 +67,8 @@ export const getAllTVShows = async (request: FastifyRequest, reply: FastifyReply
       ];
     }
 
+    Object.assign(filter, ownershipClause(request));
+
     const [tvShows, total] = await Promise.all([
       TVShowModel.find(filter)
         .populate('genres', 'name image')
@@ -99,6 +112,11 @@ export const getTVShowById = async (request: FastifyRequest, reply: FastifyReply
   try {
     const { id } = request.params as { id: string };
 
+    const owned = await TVShowModel.findOne({ _id: id, ...ownershipClause(request) }).select('_id').lean();
+    if (!owned) {
+      return reply.status(404).send({ success: false, error: 'TVShow not found' });
+    }
+
     // Sync HLS qualities from disk if they exist but are missing in DB
     try {
       const { autoDetectAndSyncQualities } = await import('../services/videoProcessor');
@@ -141,6 +159,15 @@ export const createTVShow = async (request: FastifyRequest, reply: FastifyReply)
   try {
     const body = request.body as any;
 
+    if (blockInfluencerEditorial(request, reply, body)) return;
+    if (isInfluencerRequest(request) && body?.status === 'moderation') {
+      return reply.status(400).send({
+        success: false,
+        error: 'Save the series first, then submit it for review once episodes are ready.',
+      });
+    }
+    if (!(await enforceCreatorSubmissionQuota(request, reply))) return;
+
     // Reject ephemeral browser blob: URLs (they only work in the tab that created them)
     const blobFields = ['hlsUrl', 'videoUrl', 'sourceVideoUrl', 'trailerUrl', 'thumbnail', 'posterImage', 'bannerImage'] as const;
     for (const field of blobFields) {
@@ -172,6 +199,13 @@ export const createTVShow = async (request: FastifyRequest, reply: FastifyReply)
     if (trailer && body.videoUrl === trailer) delete body.videoUrl;
     if (trailer && body.sourceVideoUrl === trailer) delete body.sourceVideoUrl;
 
+    body.createdBy = assignCreatedBy(request, body);
+    if (isInfluencerRequest(request)) {
+      body.status = isRawLocalVideo ? 'processing' : 'draft';
+      body.featured = false;
+      body.trending = false;
+    }
+
     const tvShow = await TVShowModel.create(body);
     await syncSections(tvShow._id.toString(), body.sections);
 
@@ -181,25 +215,7 @@ export const createTVShow = async (request: FastifyRequest, reply: FastifyReply)
       });
     }
 
-    // Trigger push notification to all users — only if published
-    if (tvShow.status === 'published') {
-      try {
-        const { NotificationModel } = await import('../models/Notification');
-        await NotificationModel.create({
-          title: 'New Web Series Added! 🍿',
-          body: `Watch ${tvShow.title} now on the app!`,
-          type: 'content_release',
-          targetAudience: 'all',
-          contentId: tvShow._id,
-          status: 'sent',
-          metrics: { targetCount: 0, sentCount: 1, openedCount: 0, clickedCount: 0 },
-          sentAt: new Date(),
-          priority: 'high'
-        });
-      } catch (notifErr) {
-        logger.error({ notifErr }, 'Error sending new tvShow notification');
-      }
-    }
+    await notifyIfNewlyPublished('webseries', tvShow._id, tvShow.title, undefined, tvShow.status);
 
     return reply.status(201).send({
       success: true,
@@ -230,9 +246,30 @@ export const updateTVShow = async (request: FastifyRequest, reply: FastifyReply)
       }
     }
 
-    const existingTVShow = await TVShowModel.findById(id).lean();
+    const existingTVShow = await TVShowModel.findOne({ _id: id, ...ownershipClause(request) }).lean();
     if (!existingTVShow) {
       return reply.status(404).send({ success: false, error: 'TVShow not found' });
+    }
+
+    if (blockInfluencerEditorial(request, reply, body)) return;
+    if (isInfluencerRequest(request) && body.status === 'moderation') {
+      const merged = { ...existingTVShow, ...body };
+      if (body.copyrightAttested !== true) {
+        return reply.status(400).send({ success: false, error: 'Copyright attestation is required before submitting for review' });
+      }
+      const blocked = await tvShowNotReadyReason(merged);
+      if (blocked) return reply.status(400).send({ success: false, error: blocked });
+      body.copyrightAttested = true;
+      body.copyrightAttestedAt = new Date();
+      body.submittedAt = new Date();
+    }
+    delete body.createdBy;
+    if (isInfluencerRequest(request)) {
+      delete body.approvedBy;
+      delete body.approvedAt;
+      delete body.rejectedBy;
+      delete body.featured;
+      delete body.trending;
     }
 
     // Check if the hlsUrl has changed to a new raw MP4
@@ -266,6 +303,11 @@ export const updateTVShow = async (request: FastifyRequest, reply: FastifyReply)
 
     if (body.sections !== undefined) {
       await syncSections(id, body.sections);
+    }
+
+    await notifyIfNewlyPublished('webseries', tvShow._id, tvShow.title, (existingTVShow as any).status, tvShow.status);
+    if (isInfluencerRequest(request) && body.status === 'moderation' && (existingTVShow as any).status !== 'moderation') {
+      await notifyAdminsOfSubmission('TVShow', tvShow.title);
     }
 
     if (isRawLocalVideo) {
@@ -310,7 +352,12 @@ export const updateTVShow = async (request: FastifyRequest, reply: FastifyReply)
 export const approveTVShow = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const { id } = request.params as { id: string };
+    if (denyInfluencerModerationAction(request, reply)) return;
     const currentUser = (request as any).user;
+    const existing = await TVShowModel.findById(id).select('status title').lean();
+    if (!existing) {
+      return reply.status(404).send({ success: false, error: 'TVShow not found' });
+    }
 
     const tvShow = await TVShowModel.findByIdAndUpdate(
       id,
@@ -326,6 +373,8 @@ export const approveTVShow = async (request: FastifyRequest, reply: FastifyReply
     if (!tvShow) {
       return reply.status(404).send({ success: false, error: 'TVShow not found' });
     }
+
+    await notifyIfNewlyPublished('webseries', tvShow._id, tvShow.title, (existing as any).status, 'published');
 
     // Send approval email to creator
     if (tvShow.createdBy) {
@@ -351,7 +400,9 @@ export const approveTVShow = async (request: FastifyRequest, reply: FastifyReply
 export const rejectTVShow = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const { id } = request.params as { id: string };
-    const { reason } = request.body as { reason?: string };
+    if (denyInfluencerModerationAction(request, reply)) return;
+    const body = (request.body || {}) as { reason?: string; rejectionReason?: string };
+    const reason = body.rejectionReason || body.reason;
     const currentUser = (request as any).user;
 
     const tvShow = await TVShowModel.findByIdAndUpdate(
@@ -403,7 +454,7 @@ export const getPendingApprovals = async (request: FastifyRequest, reply: Fastif
     const limit = Math.min(100, Math.max(1, Number(query.limit || 20)));
     const skip = (page - 1) * limit;
 
-    const filter: any = { status: 'moderation' };
+    const filter: any = { status: 'moderation', ...ownershipClause(request) };
 
     const [tvShows, total] = await Promise.all([
       TVShowModel.find(filter)
@@ -431,7 +482,7 @@ export const deleteTVShow = async (request: FastifyRequest, reply: FastifyReply)
   try {
     const { id } = request.params as { id: string };
 
-    const tvShow = await TVShowModel.findByIdAndDelete(id);
+    const tvShow = await TVShowModel.findOneAndDelete({ _id: id, ...ownershipClause(request) });
     if (tvShow) await EpisodeModel.deleteMany({ tvShowId: id });
 
     if (!tvShow) {
@@ -451,14 +502,32 @@ export const deleteTVShow = async (request: FastifyRequest, reply: FastifyReply)
 export const updateTVShowStatus = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const { id } = request.params as { id: string };
-    const { status, rejectionReason } = request.body as {
+    const { status, rejectionReason, copyrightAttested } = request.body as {
       status: 'published' | 'draft' | 'processing' | 'moderation' | 'rejected';
       rejectionReason?: string;
+      copyrightAttested?: boolean;
     };
+
+    if (blockInfluencerEditorial(request, reply, { status })) return;
+
+    const existing = await TVShowModel.findOne({ _id: id, ...ownershipClause(request) }).lean();
+    if (!existing) {
+      return reply.status(404).send({ success: false, error: 'TVShow not found' });
+    }
 
     const updateData: any = { status };
     if (rejectionReason && status === 'rejected') {
       updateData.rejectionReason = rejectionReason;
+    }
+    if (isInfluencerRequest(request) && status === 'moderation') {
+      if (copyrightAttested !== true) {
+        return reply.status(400).send({ success: false, error: 'Copyright attestation is required before submitting for review' });
+      }
+      const blocked = await tvShowNotReadyReason(existing);
+      if (blocked) return reply.status(400).send({ success: false, error: blocked });
+      updateData.copyrightAttested = true;
+      updateData.copyrightAttestedAt = new Date();
+      updateData.submittedAt = new Date();
     }
 
     const tvShow = await TVShowModel.findByIdAndUpdate(
@@ -469,6 +538,11 @@ export const updateTVShowStatus = async (request: FastifyRequest, reply: Fastify
 
     if (!tvShow) {
       return reply.status(404).send({ success: false, error: 'TVShow not found' });
+    }
+
+    await notifyIfNewlyPublished('webseries', tvShow._id, tvShow.title, (existing as any).status, tvShow.status);
+    if (isInfluencerRequest(request) && status === 'moderation') {
+      await notifyAdminsOfSubmission('TVShow', tvShow.title);
     }
 
     return reply.send({
@@ -487,6 +561,7 @@ export const updateTVShowStatus = async (request: FastifyRequest, reply: Fastify
 // Toggle featured status
 export const toggleFeatured = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
+    if (denyInfluencerModerationAction(request, reply)) return;
     const { id } = request.params as { id: string };
 
     const tvShow = await TVShowModel.findById(id).lean();
@@ -517,6 +592,7 @@ export const toggleFeatured = async (request: FastifyRequest, reply: FastifyRepl
 // Toggle trending status
 export const toggleTrending = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
+    if (denyInfluencerModerationAction(request, reply)) return;
     const { id } = request.params as { id: string };
 
     const tvShow = await TVShowModel.findById(id).lean();
@@ -545,9 +621,49 @@ export const toggleTrending = async (request: FastifyRequest, reply: FastifyRepl
 };
 
 // Get tvShow HLS processing status — lightweight polling endpoint for admin panel
+export const submitTVShowForReview = async (request: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { id } = request.params as { id: string };
+    const body = (request.body || {}) as { copyrightAttested?: boolean };
+    const tvShow = await TVShowModel.findOne({ _id: id, ...ownershipClause(request) });
+    if (!tvShow) return reply.status(404).send({ success: false, error: 'TVShow not found' });
+    if (tvShow.status === 'published') {
+      return reply.status(400).send({ success: false, error: 'This title is already published' });
+    }
+    if (tvShow.status === 'moderation') {
+      return reply.status(400).send({ success: false, error: 'This title is already waiting for review' });
+    }
+    if (body.copyrightAttested !== true) {
+      return reply.status(400).send({ success: false, error: 'Copyright attestation is required before submitting for review' });
+    }
+    const blocked = await tvShowNotReadyReason(tvShow);
+    if (blocked) return reply.status(400).send({ success: false, error: blocked });
+
+    tvShow.status = 'moderation';
+    tvShow.copyrightAttested = true;
+    tvShow.copyrightAttestedAt = new Date();
+    tvShow.submittedAt = new Date();
+    await tvShow.save();
+    await notifyAdminsOfSubmission('TVShow', tvShow.title);
+
+    return reply.send({
+      success: true,
+      message: 'Submitted for review',
+      data: { ...tvShow.toObject(), id: tvShow._id.toString() },
+    });
+  } catch (error: any) {
+    logger.error({ error }, 'Error submitting tv show for review');
+    return reply.status(500).send({ success: false, error: error.message });
+  }
+};
+
 export const getTVShowProcessingStatus = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const { id } = request.params as { id: string };
+    if (isInfluencerRequest(request)) {
+      const owned = await TVShowModel.findOne({ _id: id, ...ownershipClause(request) }).select('_id').lean();
+      if (!owned) return reply.status(404).send({ success: false, error: 'TVShow not found' });
+    }
 
     const tvShow = await TVShowModel.findById(id)
       .select('processingStatus processingError hlsUrl videoQualities status title')

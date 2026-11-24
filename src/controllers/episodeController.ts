@@ -4,6 +4,7 @@ import { TVShowModel } from '../models/TVShow';
 import { Types } from 'mongoose';
 import { logger } from '../lib/logger';
 import { isRawLocalVideo } from '../lib/contentResolver';
+import { assignCreatedBy, isInfluencerRequest, ownershipClause, requestUserId, sameOwner } from '../lib/creatorAccess';
 
 export const getAllEpisodes = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
@@ -22,6 +23,12 @@ export const getAllEpisodes = async (request: FastifyRequest, reply: FastifyRepl
 
     const filter: any = {};
     if (query.tvShowId) {
+      if (isInfluencerRequest(request)) {
+        const show = await TVShowModel.findById(query.tvShowId).select('createdBy').lean();
+        if (!show || !sameOwner(show, requestUserId(request))) {
+          return reply.status(404).send({ success: false, error: 'TVShow not found' });
+        }
+      }
       filter.tvShowId = query.tvShowId;
     } else if (query.TVShowType) {
       const tvShowIds = await TVShowModel.find({ TVShowType: query.TVShowType as 'drama' | 'movie' })
@@ -30,6 +37,8 @@ export const getAllEpisodes = async (request: FastifyRequest, reply: FastifyRepl
         .then((contents) => contents.map((c) => c._id));
       filter.tvShowId = { $in: tvShowIds };
     }
+
+    Object.assign(filter, ownershipClause(request));
 
     if (query.season) filter.season = Number(query.season);
     if (query.search) {
@@ -74,6 +83,11 @@ export const getEpisodeById = async (request: FastifyRequest, reply: FastifyRepl
   try {
     const { id } = request.params as { id: string };
 
+    const owned = await EpisodeModel.findOne({ _id: id, ...ownershipClause(request) }).select('_id').lean();
+    if (!owned) {
+      return reply.status(404).send({ success: false, error: 'Episode not found' });
+    }
+
     // Sync HLS qualities from disk if they exist but are missing in DB
     try {
       const { autoDetectAndSyncQualities } = await import('../services/videoProcessor');
@@ -117,6 +131,15 @@ export const createEpisode = async (request: FastifyRequest, reply: FastifyReply
       body.processingStatus = 'ready';
     }
 
+    if (body.tvShowId) {
+      const show = await TVShowModel.findById(body.tvShowId).select('createdBy').lean();
+      if (!show) return reply.status(404).send({ success: false, error: 'TVShow not found' });
+      if (isInfluencerRequest(request) && !sameOwner(show, requestUserId(request))) {
+        return reply.status(404).send({ success: false, error: 'TVShow not found' });
+      }
+    }
+
+    body.createdBy = assignCreatedBy(request, body);
     const episode = await EpisodeModel.create(body);
 
     if (shouldProcessHls && videoPath) {
@@ -140,10 +163,17 @@ export const updateEpisode = async (request: FastifyRequest, reply: FastifyReply
     const { id } = request.params as { id: string };
     const body = request.body as any;
 
-    const existingEpisode = await EpisodeModel.findById(id).lean();
+    const existingEpisode = await EpisodeModel.findOne({ _id: id, ...ownershipClause(request) }).lean();
     if (!existingEpisode) {
       return reply.status(404).send({ success: false, error: 'Episode not found' });
     }
+    if (body.tvShowId && isInfluencerRequest(request)) {
+      const show = await TVShowModel.findById(body.tvShowId).select('createdBy').lean();
+      if (!show || !sameOwner(show, requestUserId(request))) {
+        return reply.status(404).send({ success: false, error: 'TVShow not found' });
+      }
+    }
+    delete body.createdBy;
 
     const videoPath = (body.sourceVideoUrl || body.hlsUrl || '').trim();
     const prevPath = String((existingEpisode as any).sourceVideoUrl || (existingEpisode as any).hlsUrl || '');
@@ -195,7 +225,7 @@ export const deleteEpisode = async (request: FastifyRequest, reply: FastifyReply
   try {
     const { id } = request.params as { id: string };
 
-    const episode = await EpisodeModel.findByIdAndDelete(id);
+    const episode = await EpisodeModel.findOneAndDelete({ _id: id, ...ownershipClause(request) });
     if (!episode) {
       return reply.status(404).send({ success: false, error: 'Episode not found' });
     }
@@ -212,8 +242,8 @@ export const toggleEpisodeLock = async (request: FastifyRequest, reply: FastifyR
     const { id } = request.params as { id: string };
     const { isLocked } = request.body as { isLocked: boolean };
 
-    const episode = await EpisodeModel.findByIdAndUpdate(
-      id,
+    const episode = await EpisodeModel.findOneAndUpdate(
+      { _id: id, ...ownershipClause(request) },
       { $set: { isLocked } },
       { new: true }
     ).lean();
@@ -236,7 +266,7 @@ export const getSeasons = async (request: FastifyRequest, reply: FastifyReply) =
       tvShowId?: string;
     };
 
-    const matchFilter: any = {};
+    const matchFilter: any = { ...ownershipClause(request) };
     if (query.tvShowId && Types.ObjectId.isValid(query.tvShowId)) {
       matchFilter.tvShowId = new Types.ObjectId(query.tvShowId);
     }

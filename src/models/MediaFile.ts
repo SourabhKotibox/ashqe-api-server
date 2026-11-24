@@ -38,6 +38,7 @@ export interface IMediaFile extends Document {
   posterFrameUrl?: string; // auto-extracted cover frame
   transcoder?: 'local' | 'aws' | 'progressive';
   mediaConvertJobId?: string;
+  createdBy?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -85,6 +86,7 @@ const MediaFileSchema = new Schema<IMediaFile>(
     posterFrameUrl: { type: String, required: false },
     transcoder: { type: String, enum: ['local', 'aws', 'progressive'], required: false },
     mediaConvertJobId: { type: String, required: false },
+    createdBy: { type: Schema.Types.ObjectId, ref: 'AdminUser', index: true },
   },
   { timestamps: true }
 );

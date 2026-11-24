@@ -33,6 +33,7 @@ export interface IEpisode extends Document {
   coinsRequired: number;
   processingStatus: 'queued' | 'processing' | 'ready' | 'failed';
   processingError?: string;
+  createdBy?: Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -76,6 +77,7 @@ const EpisodeSchema = new Schema<IEpisode>(
       index: true,
     },
     processingError: String,
+    createdBy: { type: Schema.Types.ObjectId, ref: 'AdminUser', index: true },
   },
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );

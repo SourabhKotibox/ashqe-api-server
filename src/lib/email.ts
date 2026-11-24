@@ -295,6 +295,86 @@ export const sendAdminPasswordResetEmail = async (email: string, name: string, u
   }
 };
 
+const adminLoginUrl = () =>
+  `${(process.env.ADMIN_PANEL_URL || 'http://localhost:5173').replace(/\/$/, '')}/admin/login`;
+
+/**
+ * Creator onboarding email. Uses the same SMTP config as sendWelcomeEmail.
+ * Returns false (without throwing) when mail is not configured or sending fails.
+ */
+export const sendCreatorWelcomeEmail = async (email: string, name: string, password: string): Promise<boolean> => {
+  const result = await createTransporter();
+  if (!result) {
+    console.log(`[email] Skipped creator welcome email (no credentials). to=${email}`);
+    return false;
+  }
+  const { transporter, from } = result;
+  try {
+    const platformName = await getPlatformName();
+    const loginUrl = adminLoginUrl();
+    const subject = `Your ${platformName} creator login`;
+    const html = wrapEmail(`
+      <p>Hi <strong>${name}</strong>,</p>
+      <p>Your creator account on <strong>${platformName}</strong> has been approved. Use the login ID and temporary password below to open the creator dashboard.</p>
+      <table style="border-collapse:collapse;width:100%;max-width:460px;margin-top:12px;background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
+        <tr>
+          <td style="padding:14px 18px;color:#6b7280;font-size:13px;width:140px;background:#fff;border-bottom:1px solid #e5e7eb;">Login ID</td>
+          <td style="padding:14px 18px;color:#111827;font-weight:700;font-size:14px;background:#fff;border-bottom:1px solid #e5e7eb;">${email}</td>
+        </tr>
+        <tr>
+          <td style="padding:14px 18px;color:#6b7280;font-size:13px;width:140px;background:#fff;">Temporary password</td>
+          <td style="padding:14px 18px;color:#dc2626;font-weight:700;font-size:14px;background:#fff;font-family:monospace;">${password}</td>
+        </tr>
+      </table>
+      <p style="margin-top:20px;">
+        <a href="${loginUrl}"
+           style="display:inline-block;background:linear-gradient(135deg,#ef4444 0%,#dc2626 100%);color:#fff;text-decoration:none;padding:12px 28px;border-radius:6px;font-weight:600;font-size:14px;">
+          Log in
+        </a>
+      </p>
+      <p style="margin-top:24px;color:#6b7280;font-size:13px;">
+        <strong style="color:#dc2626;">You must change this password on first login.</strong>
+        Do not share these credentials. After you sign in, the dashboard will ask you to set a new password before you can continue.
+      </p>
+    `, platformName);
+    await transporter.sendMail({ from, to: email, subject, html });
+    console.log(`[email] Sent creator welcome to=${email}`);
+    return true;
+  } catch (error) {
+    console.error(`[email] Failed creator welcome to=${email}:`, error);
+    return false;
+  }
+};
+
+export const sendCreatorApplicationRejectedEmail = async (
+  email: string,
+  name: string,
+  reason: string
+): Promise<boolean> => {
+  const result = await createTransporter();
+  if (!result) {
+    console.log(`[email] Skipped creator rejection email (no credentials). to=${email}`);
+    return false;
+  }
+  const { transporter, from } = result;
+  try {
+    const platformName = await getPlatformName();
+    const subject = `Your ${platformName} creator application`;
+    const html = wrapEmail(`
+      <p>Hi <strong>${name}</strong>,</p>
+      <p>Thank you for applying to publish on <strong>${platformName}</strong>. We are not able to approve the application at this time.</p>
+      <p style="margin-top:16px;"><strong>Reason:</strong> ${reason}</p>
+      <p style="margin-top:16px;color:#6b7280;font-size:13px;">You may submit a new application after you have addressed the reason above.</p>
+    `, platformName);
+    await transporter.sendMail({ from, to: email, subject, html });
+    console.log(`[email] Sent creator rejection to=${email}`);
+    return true;
+  } catch (error) {
+    console.error(`[email] Failed creator rejection to=${email}:`, error);
+    return false;
+  }
+};
+
 export const sendApprovalEmail = async (email: string, name: string, itemType: string, itemName: string) =>
   sendTemplateEmail('Content Approved', email, {
     user_name: name,

@@ -7,6 +7,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { logger } from '../lib/logger';
 import uploadHandler from '../lib/uploadHandler';
+import { assignCreatedBy, creatorFileTooLargeReason, isInfluencerRequest, ownershipClause, requestUserId } from '../lib/creatorAccess';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -227,7 +228,7 @@ export const getFilesByFolder = async (request: FastifyRequest, reply: FastifyRe
       return reply.status(404).send({ success: false, error: 'Folder not found' });
     }
 
-    const files = await MediaFileModel.find({ folder: id }).sort({ createdAt: -1 }).lean();
+    const files = await MediaFileModel.find({ folder: id, ...ownershipClause(request) }).sort({ createdAt: -1 }).lean();
     const filesWithSize = files.map((file) => {
       const { url: fileUrl, filePath } = resolvePublicMediaUrls(file as any, request);
       
@@ -292,7 +293,7 @@ export const getAllMediaFiles = async (request: FastifyRequest, reply: FastifyRe
     ).catch(() => {});
 
     // Build filter
-    const filter: any = {};
+    const filter: any = { ...ownershipClause(request) };
     if (query.source) filter.source = query.source;
     if (query.fileType) filter.fileType = new RegExp(query.fileType, 'i');
     if (query.search) filter.name = new RegExp(query.search, 'i');
@@ -391,6 +392,7 @@ export const uploadFilesToFolder = async (request: FastifyRequest, reply: Fastif
           trackInMediaLibrary: true,
           source: source,
           folderId: targetFolderId,
+          createdBy: requestUserId(request),
         });
         savedFiles.push(uploadedFile);
       } else if (part.type === 'field' && part.fieldname === 'source') {
@@ -415,7 +417,7 @@ export const getMediaFileById = async (request: FastifyRequest, reply: FastifyRe
     if (!Types.ObjectId.isValid(id)) {
       return reply.status(400).send({ success: false, error: 'Invalid file ID' });
     }
-    const file = await MediaFileModel.findById(id).lean();
+    const file = await MediaFileModel.findOne({ _id: id, ...ownershipClause(request) }).lean();
     if (!file) {
       return reply.status(404).send({ success: false, error: 'File not found' });
     }
@@ -527,7 +529,7 @@ export const deleteFile = async (request: FastifyRequest, reply: FastifyReply) =
       return reply.status(400).send({ success: false, error: 'Invalid file ID' });
     }
 
-    const file = await MediaFileModel.findById(id);
+    const file = await MediaFileModel.findOne({ _id: id, ...ownershipClause(request) });
     if (!file) {
       return reply.status(404).send({ success: false, error: 'File not found' });
     }
@@ -570,6 +572,11 @@ export const presignMediaUpload = async (request: FastifyRequest, reply: Fastify
 
     if (!body?.fileName || !body?.contentType) {
       return reply.status(400).send({ success: false, error: 'fileName and contentType are required' });
+    }
+
+    if (isInfluencerRequest(request)) {
+      const sizeError = creatorFileTooLargeReason((body as { fileSize?: number; size?: number }).fileSize ?? (body as { size?: number }).size);
+      if (sizeError) return reply.status(400).send({ success: false, error: sizeError });
     }
 
     const { isS3Configured, generatePresignedUrl } = await import('../lib/s3');
@@ -641,6 +648,11 @@ export const confirmS3MediaUpload = async (request: FastifyRequest, reply: Fasti
       return reply.status(400).send({ success: false, error: 'key, publicUrl and folderId are required' });
     }
 
+    if (isInfluencerRequest(request)) {
+      const sizeError = creatorFileTooLargeReason(body.fileSize);
+      if (sizeError) return reply.status(400).send({ success: false, error: sizeError });
+    }
+
     const isVideo =
       (body.contentType || '').startsWith('video/') ||
       /\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(body.originalName || body.fileName || '');
@@ -655,6 +667,7 @@ export const confirmS3MediaUpload = async (request: FastifyRequest, reply: Fasti
       source: body.source || 'media-library',
       storageType: 's3',
       s3Key: body.key,
+      createdBy: assignCreatedBy(request, {}),
     };
     if (isVideo) createPayload.hlsStatus = 'processing';
 
