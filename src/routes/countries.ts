@@ -1,4 +1,4 @@
-import { requirePermission, authenticateAndAttach } from '../middlewares/rbac';
+import { requireAnyPermission, authenticateAndAttach } from '../middlewares/rbac';
 import type { FastifyPluginAsync } from 'fastify';
 import {
   listCountries,
@@ -15,14 +15,18 @@ const countriesRoutes: FastifyPluginAsync = async (fastify) => {
   // Get country by ID — allow any authenticated user
   fastify.get('/:id', { onRequest: [authenticateAndAttach] }, getCountryById);
 
-  // Create new country — require settings permission
-  fastify.post('/', { onRequest: [requirePermission('settings', 'canCreate')] }, createCountry);
+  // Staff keep settings.*. Creators use countries.* so settings stays closed.
+  const countryWrite = (action: 'canCreate' | 'canEdit' | 'canDelete') =>
+    requireAnyPermission([['settings', action], ['countries', action]]);
 
-  // Update country — require settings permission
-  fastify.put('/:id', { onRequest: [requirePermission('settings', 'canEdit')] }, updateCountry);
+  // Create new country
+  fastify.post('/', { onRequest: [countryWrite('canCreate')] }, createCountry);
 
-  // Delete country — require settings permission
-  fastify.delete('/:id', { onRequest: [requirePermission('settings', 'canDelete')] }, deleteCountry);
+  // Update country
+  fastify.put('/:id', { onRequest: [countryWrite('canEdit')] }, updateCountry);
+
+  // Delete country
+  fastify.delete('/:id', { onRequest: [countryWrite('canDelete')] }, deleteCountry);
 };
 
 export default countriesRoutes;

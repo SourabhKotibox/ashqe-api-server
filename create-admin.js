@@ -26,6 +26,7 @@ async function createAdmin() {
             actors: { canView: true, canCreate: true, canEdit: true, canDelete: true },
             directors: { canView: true, canCreate: true, canEdit: true, canDelete: true },
             languages: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+            countries: { canView: true, canCreate: true, canEdit: true, canDelete: true },
             categories: { canView: true, canCreate: true, canEdit: true, canDelete: true },
             mediaLibrary: { canView: true, canUpload: true, canDelete: true },
             banners: { canView: true, canCreate: true, canEdit: true, canDelete: true },

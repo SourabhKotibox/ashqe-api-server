@@ -89,6 +89,44 @@ export const requirePermission = (
 };
 
 /**
+ * Allow the request when any one of the module actions is granted.
+ * Superadmin bypasses. Used where staff and creators authorize through different keys
+ * (country writes: settings.* for staff, countries.* for creators).
+ */
+export const requireAnyPermission = (
+  checks: Array<[keyof IModulePermissions, 'canView' | 'canCreate' | 'canEdit' | 'canDelete' | 'canUpload']>
+) => {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      await request.jwtVerify();
+      const decodedUser = request.user as { id: string; role: string };
+      if (!decodedUser || !decodedUser.id) {
+        return reply.status(401).send({ error: 'Unauthorized — valid Bearer token required' });
+      }
+
+      const user = await AdminUserModel.findById(decodedUser.id).lean();
+      if (!user) return reply.status(401).send({ error: 'Unauthorized — User not found' });
+      if (!user.isActive) return reply.status(401).send({ error: 'Unauthorized — Account is inactive' });
+
+      if (user.role !== 'superadmin') {
+        const allowed = checks.some(([moduleName, action]) => !!(user.modulePermissions as any)?.[moduleName]?.[action]);
+        if (!allowed) {
+          const needed = checks.map(([moduleName, action]) => `${moduleName}.${action}`).join(' or ');
+          return reply.status(403).send({ error: `Forbidden — Insufficient permissions (${needed})` });
+        }
+      }
+
+      (request as any).adminUser = user;
+    } catch (err: any) {
+      if (err.statusCode === 401 || err.code === 'FST_JWT_NO_AUTHORIZATION_IN_HEADER' || err.code === 'FAST_JWT_EXPIRED') {
+        return reply.status(401).send({ error: 'Unauthorized — valid Bearer token required' });
+      }
+      return reply.status(500).send({ error: 'Internal Server Error' });
+    }
+  };
+};
+
+/**
  * Fastify middleware: require one of the allowed roles
  * Usage: fastify.get('/path', { onRequest: [requireRole('admin', 'superadmin')] }, handler)
  */

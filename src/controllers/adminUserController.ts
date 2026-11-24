@@ -5,6 +5,7 @@ import { AdminUserModel } from '../models/AdminUser';
 import { logger } from '../lib/logger';
 import { sendWelcomeEmail, sendAdminPasswordResetEmail } from '../lib/email';
 import { isRoleHigherThan } from '../middlewares/rbac';
+import { CREATOR_CATALOG_PERMISSIONS } from '../lib/creatorAccess';
 
 
 // Default module permissions to ensure we have all fields
@@ -14,6 +15,7 @@ const DEFAULT_MODULE_PERMISSIONS = {
   actors: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   directors: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   languages: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+  countries: { canView: false, canCreate: false, canEdit: false, canDelete: false },
   categories: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   mediaLibrary: { canView: true, canUpload: false, canDelete: false },
   banners: { canView: true, canCreate: false, canEdit: false, canDelete: false },
@@ -256,6 +258,13 @@ export const updateAdminUser = async (request: FastifyRequest, reply: FastifyRep
           ...DEFAULT_MODULE_PERMISSIONS[key],
           ...(body.modulePermissions?.[key] || {}),
         };
+      }
+      // Old admin clients omit catalog keys. Keep the stored grant instead of resetting it.
+      const existingPerms = (await AdminUserModel.findById(id).select('modulePermissions').lean())?.modulePermissions as any;
+      for (const key of Object.keys(CREATOR_CATALOG_PERMISSIONS)) {
+        if (!body.modulePermissions[key] && existingPerms?.[key]) {
+          (mergedModulePermissions as any)[key] = existingPerms[key];
+        }
       }
       updateData.modulePermissions = mergedModulePermissions;
     }

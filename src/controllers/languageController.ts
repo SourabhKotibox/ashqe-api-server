@@ -1,8 +1,22 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { LanguageModel } from '../models/Language';
 import uploadHandler from '../lib/uploadHandler';
+import {
+  applyCatalogSearch,
+  asBool,
+  blockInfluencerCatalogPublish,
+  catalogCreatedBy,
+  denyUnlessCatalogOwner,
+  enforceInfluencerCatalogCreate,
+  exactNameRegex,
+  findCatalogDuplicate,
+  hasCatalogSession,
+  invalidCatalogName,
+  isMultipartRequest,
+  ownedId,
+  sendDuplicate,
+} from '../lib/catalogAccess';
 
-// Helper function to get full image URL (local storage)
 async function getImageUrl(filePath: string | null | undefined): Promise<string | null> {
   if (!filePath) return null;
   if (filePath.startsWith('http')) return filePath;
@@ -10,23 +24,46 @@ async function getImageUrl(filePath: string | null | undefined): Promise<string 
   return `/uploads/${filePath.replace(/^\//, '')}`;
 }
 
+const languageData = async (language: any) => ({
+  id: language._id.toString(),
+  name: language.name,
+  code: language.code,
+  image: await getImageUrl(language.image),
+  isActive: language.isActive,
+  order: language.order,
+  createdBy: ownedId(language.createdBy),
+  createdAt: language.createdAt,
+  updatedAt: language.updatedAt,
+});
+
+const readLanguageInput = async (request: FastifyRequest) => {
+  if (!isMultipartRequest(request)) return { ...((request.body as Record<string, unknown>) || {}) };
+  const data: Record<string, unknown> = {};
+  for await (const part of request.parts()) {
+    if (part.type === 'field') {
+      if (part.fieldname === 'name') data.name = part.value;
+      if (part.fieldname === 'code') data.code = part.value;
+      if (part.fieldname === 'image') data.image = part.value;
+      if (part.fieldname === 'isActive') data.isActive = part.value;
+      if (part.fieldname === 'order') data.order = part.value;
+    } else if (part.type === 'file') {
+      const uploadedFile = await uploadHandler.saveFileFromPart(part, request, 'LANGUAGE');
+      data.image = uploadedFile.filePath;
+    }
+  }
+  return data;
+};
+
 export const listLanguages = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
-    const query = request.query as { includeSkip?: string };
+    const query = request.query as { includeSkip?: string; search?: string; q?: string; admin?: string };
     const includeSkip = query.includeSkip === 'true';
+    const includeInactive = query.admin === 'true' && (await hasCatalogSession(request));
+    const filter: Record<string, unknown> = includeInactive ? {} : { isActive: true };
+    applyCatalogSearch(filter, query.search || query.q, ['name', 'code']);
 
-    const languages = await LanguageModel.find({ isActive: true }).sort({ order: 1, createdAt: -1 }).lean();
-
-    const filteredLanguages = await Promise.all(languages.map(async (lang) => ({
-      id: lang._id.toString(),
-      name: lang.name,
-      code: lang.code,
-      image: await getImageUrl(lang.image),
-      isActive: lang.isActive,
-      order: lang.order,
-      createdAt: lang.createdAt,
-      updatedAt: lang.updatedAt
-    })));
+    const languages = await LanguageModel.find(filter).sort({ order: 1, createdAt: -1 }).lean();
+    const filteredLanguages = await Promise.all(languages.map((lang) => languageData(lang)));
 
     const data = includeSkip
       ? [
@@ -37,6 +74,7 @@ export const listLanguages = async (request: FastifyRequest, reply: FastifyReply
             image: null,
             isActive: true,
             order: -1,
+            createdBy: null,
             createdAt: null,
             updatedAt: null,
             isSkippable: true,
@@ -45,16 +83,13 @@ export const listLanguages = async (request: FastifyRequest, reply: FastifyReply
         ]
       : filteredLanguages;
 
-    return {
-      success: true,
-      data
-    };
+    return { success: true, data };
   } catch (error: any) {
     console.error('Error in listLanguages:', error);
     return reply.status(500).send({
       success: false,
       message: 'Internal server error',
-      error: error.message
+      error: error.message,
     });
   }
 };
@@ -63,75 +98,59 @@ export const getLanguage = async (request: FastifyRequest, reply: FastifyReply) 
   try {
     const { id } = request.params as { id: string };
     const language = await LanguageModel.findById(id).lean();
-
     if (!language) {
       return reply.status(404).send({ success: false, message: 'Language not found' });
     }
-
-    return {
-      success: true,
-      data: {
-        id: language._id.toString(),
-        name: language.name,
-        code: language.code,
-        image: await getImageUrl(language.image),
-        isActive: language.isActive,
-        order: language.order,
-        createdAt: language.createdAt,
-        updatedAt: language.updatedAt
-      }
-    };
+    return { success: true, data: await languageData(language) };
   } catch (error) {
     console.error('Error getting language:', error);
     return reply.status(500).send({ success: false, message: 'Internal server error' });
   }
 };
 
+const duplicateLanguage = (name: string, code: string, exceptId?: string) =>
+  findCatalogDuplicate(LanguageModel, name, exceptId, [{ code: exactNameRegex(code) }]);
+
 export const createLanguage = async (request: FastifyRequest, reply: FastifyReply) => {
+  let code = '';
   try {
-    const parts = request.parts();
-    let name: string | undefined;
-    let code: string | undefined;
-    let imagePath: string | undefined;
+    const data = await readLanguageInput(request);
+    if (blockInfluencerCatalogPublish(request, reply, data)) return;
 
-    for await (const part of parts) {
-      if (part.type === 'field') {
-        if (part.fieldname === 'name') name = part.value as string;
-        if (part.fieldname === 'code') code = part.value as string;
-        if (part.fieldname === 'image') imagePath = part.value as string;
-      } else if (part.type === 'file') {
-        const uploadedFile = await uploadHandler.saveFileFromPart(part, request, 'LANGUAGE');
-        imagePath = uploadedFile.filePath;
-      }
+    const nameError = invalidCatalogName(data.name);
+    if (nameError) return reply.status(400).send({ success: false, message: nameError, error: nameError });
+    code = String(data.code || '').trim();
+    if (!code) return reply.status(400).send({ success: false, message: 'Name and code are required', error: 'Name and code are required' });
+    if (code.length > 12) {
+      return reply.status(400).send({ success: false, message: 'Code must be 12 characters or fewer', error: 'Code must be 12 characters or fewer' });
     }
 
-    if (!name || !code) {
-      return reply.status(400).send({
-        success: false,
-        message: 'Name and code are required'
-      });
-    }
+    const name = String(data.name).trim();
+    const existing = await duplicateLanguage(name, code);
+    if (existing) return sendDuplicate(reply, existing, 'language');
+    if (!(await enforceInfluencerCatalogCreate(request, reply, LanguageModel))) return;
 
-    const language = new LanguageModel({ name, code, image: imagePath });
+    const language = new LanguageModel({
+      name,
+      code,
+      image: data.image,
+      isActive: asBool(data.isActive, true),
+      order: data.order != null && data.order !== '' ? Number(data.order) : 0,
+      createdBy: catalogCreatedBy(request),
+    });
     await language.save();
 
-    return reply.status(201).send({
-      success: true,
-      data: {
-        id: language._id.toString(),
-        name: language.name,
-        code: language.code,
-        image: await getImageUrl(language.image),
-        isActive: language.isActive,
-        order: language.order
-      }
-    });
+    return reply.status(201).send({ success: true, data: await languageData(language) });
   } catch (error: any) {
+    if (error?.code === 11000) {
+      const existing = code ? await LanguageModel.findOne({ code: exactNameRegex(code) }).lean() : null;
+      if (existing) return sendDuplicate(reply, existing, 'language');
+    }
     console.error('Error creating language:', error.message, error.stack);
-    return reply.status(500).send({ 
-      success: false, 
+    return reply.status(500).send({
+      success: false,
       message: 'Internal server error',
-      error: error.message 
+      error: error.message,
     });
   }
 };
@@ -139,59 +158,47 @@ export const createLanguage = async (request: FastifyRequest, reply: FastifyRepl
 export const updateLanguage = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const { id } = request.params as { id: string };
-    
-    const parts = request.parts();
-    const updateData: any = {};
-    let oldImage: string | undefined;
-
     const existingLang = await LanguageModel.findById(id);
     if (!existingLang) {
       return reply.status(404).send({ success: false, message: 'Language not found' });
     }
-    oldImage = existingLang.image;
+    if (denyUnlessCatalogOwner(request, reply, existingLang)) return;
 
-    for await (const part of parts) {
-      if (part.type === 'field') {
-        if (part.fieldname === 'name') updateData.name = part.value;
-        if (part.fieldname === 'code') updateData.code = part.value;
-        if (part.fieldname === 'isActive') updateData.isActive = part.value === 'true';
-        if (part.fieldname === 'order') updateData.order = parseInt(part.value as string);
-        if (part.fieldname === 'image') updateData.image = part.value;
-      } else if (part.type === 'file') {
-        const uploadedFile = await uploadHandler.saveFileFromPart(part, request, 'LANGUAGE');
-        updateData.image = uploadedFile.filePath;
-        
-        // Delete old image if it exists
-        if (oldImage) {
-          uploadHandler.deleteUploadedFile(oldImage);
-        }
+    const data = await readLanguageInput(request);
+    if (blockInfluencerCatalogPublish(request, reply, data)) return;
+
+    const updateData: Record<string, unknown> = {};
+    if (data.name !== undefined) {
+      const nameError = invalidCatalogName(data.name);
+      if (nameError) return reply.status(400).send({ success: false, message: nameError, error: nameError });
+      updateData.name = String(data.name).trim();
+    }
+    if (data.code !== undefined) {
+      const code = String(data.code).trim();
+      if (!code || code.length > 12) {
+        return reply.status(400).send({ success: false, message: 'Code must be 12 characters or fewer', error: 'Code must be 12 characters or fewer' });
       }
+      updateData.code = code;
+    }
+    if (data.isActive !== undefined) updateData.isActive = asBool(data.isActive, existingLang.isActive);
+    if (data.order !== undefined && data.order !== '') updateData.order = Number(data.order);
+    if (data.image !== undefined) updateData.image = data.image;
+
+    const nextName = String(updateData.name || existingLang.name);
+    const nextCode = String(updateData.code || existingLang.code);
+    const duplicate = await duplicateLanguage(nextName, nextCode, id);
+    if (duplicate) return sendDuplicate(reply, duplicate, 'language');
+
+    if (data.image && existingLang.image && data.image !== existingLang.image) {
+      uploadHandler.deleteUploadedFile(existingLang.image);
     }
 
-    const language = await LanguageModel.findByIdAndUpdate(
-      id,
-      { $set: updateData },
-      { new: true }
-    ).lean();
-
-    if (!language) {
-      return reply.status(404).send({ success: false, message: 'Language not found' });
-    }
-
-    return {
-      success: true,
-      data: {
-        id: language._id.toString(),
-        name: language.name,
-        code: language.code,
-        image: await getImageUrl(language.image),
-        isActive: language.isActive,
-        order: language.order
-      }
-    };
-  } catch (error) {
+    const language = await LanguageModel.findByIdAndUpdate(id, { $set: updateData }, { new: true }).lean();
+    if (!language) return reply.status(404).send({ success: false, message: 'Language not found' });
+    return { success: true, data: await languageData(language) };
+  } catch (error: any) {
     console.error('Error updating language:', error);
-    return reply.status(500).send({ success: false, message: 'Internal server error' });
+    return reply.status(500).send({ success: false, message: 'Internal server error', error: error.message });
   }
 };
 
@@ -199,22 +206,14 @@ export const deleteLanguage = async (request: FastifyRequest, reply: FastifyRepl
   try {
     const { id } = request.params as { id: string };
     const language = await LanguageModel.findById(id);
-
     if (!language) {
       return reply.status(404).send({ success: false, message: 'Language not found' });
     }
+    if (denyUnlessCatalogOwner(request, reply, language)) return;
 
-    // Delete image file if it exists
-    if (language.image) {
-      uploadHandler.deleteUploadedFile(language.image);
-    }
-
+    if (language.image) uploadHandler.deleteUploadedFile(language.image);
     await LanguageModel.findByIdAndDelete(id);
-
-    return reply.status(200).send({
-      success: true,
-      message: 'Language deleted successfully'
-    });
+    return reply.status(200).send({ success: true, message: 'Language deleted successfully' });
   } catch (error) {
     console.error('Error deleting language:', error);
     return reply.status(500).send({ success: false, message: 'Internal server error' });

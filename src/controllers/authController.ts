@@ -91,6 +91,7 @@ export const getMe = async (request: FastifyRequest, reply: FastifyReply) => {
       actors: { canView: true, canCreate: false, canEdit: false, canDelete: false },
       directors: { canView: true, canCreate: false, canEdit: false, canDelete: false },
       languages: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+      countries: { canView: false, canCreate: false, canEdit: false, canDelete: false },
       categories: { canView: true, canCreate: false, canEdit: false, canDelete: false },
       mediaLibrary: { canView: true, canUpload: false, canDelete: false },
       banners: { canView: true, canCreate: false, canEdit: false, canDelete: false },

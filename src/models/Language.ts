@@ -7,6 +7,7 @@ export interface ILanguage extends Document {
   image?: string;
   isActive: boolean;
   order: number;
+  createdBy?: mongoose.Types.ObjectId;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -18,6 +19,7 @@ const LanguageSchema = new Schema<ILanguage>(
     image: String,
     isActive: { type: Boolean, default: true },
     order: { type: Number, default: 0 },
+    createdBy: { type: Schema.Types.ObjectId, ref: 'AdminUser', index: true },
   },
   { timestamps: true, toJSON: { virtuals: true }, toObject: { virtuals: true } }
 );

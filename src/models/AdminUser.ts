@@ -9,6 +9,7 @@ export interface IModulePermissions {
   actors: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
   directors: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
   languages: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
+  countries: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
   categories: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
   mediaLibrary: { canView: boolean; canUpload: boolean; canDelete: boolean };
   banners: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
@@ -52,6 +53,7 @@ const defaultModulePermissions: IModulePermissions = {
   actors: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   directors: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   languages: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+  countries: { canView: false, canCreate: false, canEdit: false, canDelete: false },
   categories: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   mediaLibrary: { canView: true, canUpload: false, canDelete: false },
   banners: { canView: true, canCreate: false, canEdit: false, canDelete: false },
@@ -90,6 +92,7 @@ const AdminUserSchema = new Schema<IAdminUser>(
         actors: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
         directors: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
         languages: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
+        countries: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
         categories: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
         mediaLibrary: { canView: Boolean, canUpload: Boolean, canDelete: Boolean },
         banners: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },

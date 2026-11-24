@@ -5,8 +5,8 @@ export interface IActor extends Document {
   name: string;
   designation: string;
   image: string;
-  dateOfBirth: Date;
-  birthPlace: string;
+  dateOfBirth?: Date;
+  birthPlace?: string;
   status: boolean;
   approvalStatus: 'published' | 'draft' | 'moderation' | 'rejected';
   rejectionReason?: string;
@@ -24,8 +24,8 @@ const ActorSchema = new Schema<IActor>(
     name: { type: String, required: true, index: true },
     designation: { type: String, required: true },
     image: String,
-    dateOfBirth: { type: Date, required: true },
-    birthPlace: { type: String, required: true },
+    dateOfBirth: { type: Date },
+    birthPlace: String,
     status: { type: Boolean, default: true },
     approvalStatus: {
       type: String,
