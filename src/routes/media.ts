@@ -29,9 +29,10 @@ const media: FastifyPluginAsync = async (fastify) => {
   fastify.get('/files/all', { onRequest: [requirePermission('mediaLibrary', 'canView')] }, getAllMediaFiles);
   fastify.get('/files/:id', { onRequest: [requirePermission('mediaLibrary', 'canView')] }, getMediaFileById);
   fastify.post('/files/:id/reprocess-hls', { onRequest: [requirePermission('mediaLibrary', 'canCreate')] }, reprocessMediaHls);
-  fastify.post('/folders/:id/files', { onRequest: [requirePermission('mediaLibrary', 'canCreate')] }, uploadFilesToFolder);
-  fastify.post('/presign', { onRequest: [requirePermission('mediaLibrary', 'canCreate')] }, presignMediaUpload);
-  fastify.post('/confirm-s3', { onRequest: [requirePermission('mediaLibrary', 'canCreate')] }, confirmS3MediaUpload);
+  // mediaLibrary stores canUpload (there is no canCreate). Creators granted canUpload must be able to upload.
+  fastify.post('/folders/:id/files', { onRequest: [requirePermission('mediaLibrary', 'canUpload')] }, uploadFilesToFolder);
+  fastify.post('/presign', { onRequest: [requirePermission('mediaLibrary', 'canUpload')] }, presignMediaUpload);
+  fastify.post('/confirm-s3', { onRequest: [requirePermission('mediaLibrary', 'canUpload')] }, confirmS3MediaUpload);
   fastify.delete('/files/:id', { onRequest: [requirePermission('mediaLibrary', 'canDelete')] }, deleteFile);
 };
 

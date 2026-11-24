@@ -32,6 +32,9 @@ export interface IMovie extends Document {
   rejectedBy?: mongoose.Types.ObjectId;
   rejectedAt?: Date;
   createdBy?: mongoose.Types.ObjectId;
+  copyrightAttested?: boolean;
+  copyrightAttestedAt?: Date;
+  submittedAt?: Date;
   hlsUrl?: string;
   videoUrl?: string;
   videoQualities?: Array<{
@@ -109,7 +112,10 @@ const MovieSchema = new Schema<IMovie>(
     approvedAt: Date,
     rejectedBy: { type: Schema.Types.ObjectId, ref: 'AdminUser' },
     rejectedAt: Date,
-    createdBy: { type: Schema.Types.ObjectId, ref: 'AdminUser' },
+    createdBy: { type: Schema.Types.ObjectId, ref: 'AdminUser', index: true },
+    copyrightAttested: { type: Boolean, default: false },
+    copyrightAttestedAt: Date,
+    submittedAt: Date,
     hlsUrl: String,
     videoUrl: String,
     videoQualities: [
@@ -151,6 +157,7 @@ MovieSchema.index({ genres: 1 });
 MovieSchema.index({ categories: 1 });
 MovieSchema.index({ trending: 1, featured: 1 });
 MovieSchema.index({ releaseDate: -1 });
+MovieSchema.index({ createdBy: 1, status: 1 });
 
 MovieSchema.plugin(adminAuditPlugin);
 MovieSchema.plugin(mediaLinkerPlugin);

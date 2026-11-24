@@ -154,6 +154,7 @@ export const saveFileFromPart = async (
     folderId?: string;
     contentName?: string;
     contentType?: string;
+    createdBy?: string;
   }
 ): Promise<UploadedFileInfo> => {
   const typeConfig = UPLOAD_TYPES[uploadType];
@@ -278,6 +279,7 @@ export const saveFileFromPart = async (
           contentType: options?.contentType,
           storageType: 's3',
           s3Key: finalKey,
+          createdBy: options?.createdBy,
         };
         if (isVid) createPayload.hlsStatus = 'processing';
 
@@ -414,6 +416,7 @@ export const saveFileFromPart = async (
               contentName: options?.contentName,
               contentType: options?.contentType,
               storageType: 'local',
+              createdBy: options?.createdBy,
             };
             if (isVid) createPayload.hlsStatus = 'processing';
 

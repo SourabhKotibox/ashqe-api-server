@@ -21,7 +21,7 @@ export const login = async (request: FastifyRequest, reply: FastifyReply) => {
       email: email.toLowerCase().trim(),
       isActive: true,
     })
-      .select('_id email name role passwordHash')
+      .select('_id email name role passwordHash mustChangePassword')
       .lean();
 
     if (!admin?.passwordHash) {
@@ -65,6 +65,7 @@ export const login = async (request: FastifyRequest, reply: FastifyReply) => {
       accessToken,
       refreshToken,
       expiresIn: 172800,
+      mustChangePassword: !!admin.mustChangePassword,
     });
   } catch (error) {
     console.error(error);
@@ -83,7 +84,9 @@ export const getMe = async (request: FastifyRequest, reply: FastifyReply) => {
     }
     // Merge with default permissions to ensure all fields exist
     const defaultModulePermissions = {
+      users: { canView: false, canCreate: false, canEdit: false, canDelete: false },
       movies: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+      tvShows: { canView: true, canCreate: false, canEdit: false, canDelete: false },
       genres: { canView: true, canCreate: false, canEdit: false, canDelete: false },
       actors: { canView: true, canCreate: false, canEdit: false, canDelete: false },
       directors: { canView: true, canCreate: false, canEdit: false, canDelete: false },
@@ -117,6 +120,7 @@ export const getMe = async (request: FastifyRequest, reply: FastifyReply) => {
       user: { 
         ...admin, 
         id: (admin._id as any)?.toString(),
+        mustChangePassword: !!(admin as any).mustChangePassword,
         modulePermissions: mergedModulePermissions 
       } 
     };
@@ -202,12 +206,13 @@ export const updatePassword = async (request: FastifyRequest, reply: FastifyRepl
     const passwordHash = await bcrypt.hash(newPassword, 10);
 
     await AdminUserModel.findByIdAndUpdate(userId, {
-      $set: { passwordHash },
+      $set: { passwordHash, mustChangePassword: false },
     });
 
     return reply.send({
       success: true,
       message: 'Password updated successfully',
+      mustChangePassword: false,
     });
   } catch (error) {
     console.error(error);

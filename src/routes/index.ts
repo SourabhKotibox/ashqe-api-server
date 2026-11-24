@@ -53,6 +53,7 @@ import adminNotificationsRoutes from './adminNotifications';
 import reviewRoutes from './review';
 import viewsRoutes from './views';
 import partnerRoutes from './partners';
+import creatorRoutes from './creator';
 
 const router: FastifyPluginAsync = async (fastify) => {
   // Android App Links assetlinks.json - serve with correct Content-Type (register first to avoid conflicts)
@@ -116,6 +117,9 @@ const router: FastifyPluginAsync = async (fastify) => {
 
   // Partner (affiliate/reseller) program — user + admin + refund webhook
   fastify.register(partnerRoutes);
+
+  // Creator / influencer applications, review, and dashboard (separate from Partner)
+  fastify.register(creatorRoutes);
 
   // Like / Unlike route
   fastify.register(likeRoutes);

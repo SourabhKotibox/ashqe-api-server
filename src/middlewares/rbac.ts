@@ -165,6 +165,46 @@ export const requireMinRole = (minRole: string) => {
 };
 
 /**
+ * Review creator applications.
+ * Superadmins and admins are allowed. Other non-influencer roles need the
+ * influencers module permission. Influencer accounts are always rejected.
+ */
+export const requireCreatorReviewer = (action: 'canView' | 'canEdit' = 'canView') => {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      await request.jwtVerify();
+      const decodedUser = request.user as { id: string; role: string };
+
+      if (!decodedUser || !decodedUser.id) {
+        return reply.status(401).send({ error: 'Unauthorized — valid Bearer token required' });
+      }
+
+      const user = await AdminUserModel.findById(decodedUser.id).lean();
+      if (!user || !user.isActive) {
+        return reply.status(401).send({ error: 'Unauthorized — Account is inactive or deleted' });
+      }
+
+      if (user.role === 'influencer') {
+        return reply.status(403).send({ error: 'Forbidden — Creator accounts cannot review applications' });
+      }
+
+      const isAdminRole = user.role === 'admin' || user.role === 'superadmin';
+      const permitted = !!(user.modulePermissions as any)?.influencers?.[action];
+      if (!isAdminRole && !permitted) {
+        return reply.status(403).send({ error: `Forbidden — influencers.${action} permission required` });
+      }
+
+      (request as any).adminUser = user;
+    } catch (err: any) {
+      if (err.statusCode === 401 || err.code === 'FST_JWT_NO_AUTHORIZATION_IN_HEADER' || err.code === 'FAST_JWT_EXPIRED') {
+        return reply.status(401).send({ error: 'Unauthorized — valid Bearer token required' });
+      }
+      return reply.status(500).send({ error: 'Internal Server Error' });
+    }
+  };
+};
+
+/**
  * Fastify middleware: just authenticate and attach fresh user
  * Usage: fastify.get('/path', { onRequest: [authenticateAndAttach] }, handler)
  */

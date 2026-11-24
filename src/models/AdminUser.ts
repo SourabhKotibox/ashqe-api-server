@@ -35,6 +35,7 @@ export interface IAdminUser extends Document {
   phone?: string;
   modulePermissions: IModulePermissions;
   isActive: boolean;
+  mustChangePassword: boolean;
   lastLogin?: Date;
   loginCount: number;
   walletBalance: number;
@@ -108,6 +109,7 @@ const AdminUserSchema = new Schema<IAdminUser>(
       default: defaultModulePermissions,
     },
     isActive: { type: Boolean, default: true },
+    mustChangePassword: { type: Boolean, default: false },
     lastLogin: Date,
     loginCount: { type: Number, default: 0 },
     walletBalance: { type: Number, default: 0 },

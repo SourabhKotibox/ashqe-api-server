@@ -33,6 +33,9 @@ export interface ITVShow extends Document {
   rejectedBy?: mongoose.Types.ObjectId;
   rejectedAt?: Date;
   createdBy?: mongoose.Types.ObjectId;
+  copyrightAttested?: boolean;
+  copyrightAttestedAt?: Date;
+  submittedAt?: Date;
   hlsUrl?: string;
   videoUrl?: string;
   videoQualities?: Array<{
@@ -112,7 +115,10 @@ const TVShowSchema = new Schema<ITVShow>(
     approvedAt: Date,
     rejectedBy: { type: Schema.Types.ObjectId, ref: 'AdminUser' },
     rejectedAt: Date,
-    createdBy: { type: Schema.Types.ObjectId, ref: 'AdminUser' },
+    createdBy: { type: Schema.Types.ObjectId, ref: 'AdminUser', index: true },
+    copyrightAttested: { type: Boolean, default: false },
+    copyrightAttestedAt: Date,
+    submittedAt: Date,
     hlsUrl: String,
     videoUrl: String,
     videoQualities: [
@@ -155,6 +161,7 @@ TVShowSchema.index({ genres: 1 });
 TVShowSchema.index({ categories: 1 });
 TVShowSchema.index({ trending: 1, featured: 1 });
 TVShowSchema.index({ releaseDate: -1 });
+TVShowSchema.index({ createdBy: 1, status: 1 });
 
 TVShowSchema.plugin(adminAuditPlugin);
 TVShowSchema.plugin(mediaLinkerPlugin);

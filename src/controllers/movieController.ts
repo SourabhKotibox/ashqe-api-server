@@ -3,6 +3,17 @@ import { MovieModel } from '../models/Movie';
 import { SectionModel } from '../models/Section';
 import { logger } from '../lib/logger';
 import { sendApprovalEmail, sendRejectionEmail } from '../lib/email';
+import {
+  assignCreatedBy,
+  blockInfluencerEditorial,
+  denyInfluencerModerationAction,
+  enforceCreatorSubmissionQuota,
+  isInfluencerRequest,
+  movieNotReadyReason,
+  notifyAdminsOfSubmission,
+  notifyIfNewlyPublished,
+  ownershipClause,
+} from '../lib/creatorAccess';
 
 const syncSections = async (contentIdStr: string, sections: string[] | undefined) => {
   await SectionModel.updateMany(
@@ -55,6 +66,8 @@ export const getAllMovies = async (request: FastifyRequest, reply: FastifyReply)
       ];
     }
 
+    Object.assign(filter, ownershipClause(request));
+
     const [movies, total] = await Promise.all([
       MovieModel.find(filter)
         .populate('genres', 'name image')
@@ -98,6 +111,11 @@ export const getMovieById = async (request: FastifyRequest, reply: FastifyReply)
   try {
     const { id } = request.params as { id: string };
 
+    const owned = await MovieModel.findOne({ _id: id, ...ownershipClause(request) }).select('_id createdBy').lean();
+    if (!owned) {
+      return reply.status(404).send({ success: false, error: 'Movie not found' });
+    }
+
     // Sync HLS qualities from disk if they exist but are missing in DB
     try {
       const { autoDetectAndSyncQualities } = await import('../services/videoProcessor');
@@ -139,6 +157,15 @@ export const createMovie = async (request: FastifyRequest, reply: FastifyReply) 
   try {
     const body = request.body as any;
 
+    if (blockInfluencerEditorial(request, reply, body)) return;
+    if (isInfluencerRequest(request) && body?.status === 'moderation') {
+      return reply.status(400).send({
+        success: false,
+        error: 'Save the title first, then submit it for review once the video is ready.',
+      });
+    }
+    if (!(await enforceCreatorSubmissionQuota(request, reply))) return;
+
     // Reject ephemeral browser blob: URLs (they only work in the tab that created them)
     const blobFields = ['hlsUrl', 'videoUrl', 'sourceVideoUrl', 'trailerUrl', 'thumbnail', 'posterImage', 'bannerImage'] as const;
     for (const field of blobFields) {
@@ -170,26 +197,17 @@ export const createMovie = async (request: FastifyRequest, reply: FastifyReply) 
     if (trailer && body.videoUrl === trailer) delete body.videoUrl;
     if (trailer && body.sourceVideoUrl === trailer) delete body.sourceVideoUrl;
 
+    body.createdBy = assignCreatedBy(request, body);
+    if (isInfluencerRequest(request)) {
+      body.status = isRawLocalVideo ? 'processing' : 'draft';
+      body.featured = false;
+      body.trending = false;
+    }
+
     const movie = await MovieModel.create(body);
     await syncSections(movie._id.toString(), body.sections);
 
-    // Trigger push notification to all users
-    try {
-      const { NotificationModel } = await import('../models/Notification');
-      await NotificationModel.create({
-        title: 'New Movie Added! 🍿',
-        body: `Watch ${movie.title} now on the app!`,
-        type: 'content_release',
-        targetAudience: 'all',
-        contentId: movie._id,
-        status: 'sent',
-        metrics: { targetCount: 0, sentCount: 1, openedCount: 0, clickedCount: 0 },
-        sentAt: new Date(),
-        priority: 'high'
-      });
-    } catch (notifErr) {
-      logger.error({ notifErr }, 'Error sending new movie notification');
-    }
+    await notifyIfNewlyPublished('movie', movie._id, movie.title, undefined, movie.status);
 
     if (isRawLocalVideo) {
       import('../services/videoProcessor').then(({ processMovieInBackground }) => {
@@ -226,9 +244,30 @@ export const updateMovie = async (request: FastifyRequest, reply: FastifyReply) 
       }
     }
 
-    const existingMovie = await MovieModel.findById(id).lean();
+    const existingMovie = await MovieModel.findOne({ _id: id, ...ownershipClause(request) }).lean();
     if (!existingMovie) {
       return reply.status(404).send({ success: false, error: 'Movie not found' });
+    }
+
+    if (blockInfluencerEditorial(request, reply, body)) return;
+    if (isInfluencerRequest(request) && body.status === 'moderation') {
+      const merged = { ...existingMovie, ...body };
+      if (body.copyrightAttested !== true) {
+        return reply.status(400).send({ success: false, error: 'Copyright attestation is required before submitting for review' });
+      }
+      const blocked = movieNotReadyReason(merged);
+      if (blocked) return reply.status(400).send({ success: false, error: blocked });
+      body.copyrightAttested = true;
+      body.copyrightAttestedAt = new Date();
+      body.submittedAt = new Date();
+    }
+    delete body.createdBy;
+    if (isInfluencerRequest(request)) {
+      delete body.approvedBy;
+      delete body.approvedAt;
+      delete body.rejectedBy;
+      delete body.featured;
+      delete body.trending;
     }
 
     // Check if the hlsUrl has changed to a new raw MP4
@@ -262,6 +301,11 @@ export const updateMovie = async (request: FastifyRequest, reply: FastifyReply) 
 
     if (body.sections !== undefined) {
       await syncSections(id, body.sections);
+    }
+
+    await notifyIfNewlyPublished('movie', movie._id, movie.title, (existingMovie as any).status, movie.status);
+    if (isInfluencerRequest(request) && body.status === 'moderation' && (existingMovie as any).status !== 'moderation') {
+      await notifyAdminsOfSubmission('Movie', movie.title);
     }
 
     if (isRawLocalVideo) {
@@ -306,7 +350,12 @@ export const updateMovie = async (request: FastifyRequest, reply: FastifyReply) 
 export const approveMovie = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const { id } = request.params as { id: string };
+    if (denyInfluencerModerationAction(request, reply)) return;
     const currentUser = (request as any).user;
+    const existing = await MovieModel.findById(id).select('status title').lean();
+    if (!existing) {
+      return reply.status(404).send({ success: false, error: 'Movie not found' });
+    }
 
     const movie = await MovieModel.findByIdAndUpdate(
       id,
@@ -322,6 +371,8 @@ export const approveMovie = async (request: FastifyRequest, reply: FastifyReply)
     if (!movie) {
       return reply.status(404).send({ success: false, error: 'Movie not found' });
     }
+
+    await notifyIfNewlyPublished('movie', movie._id, movie.title, (existing as any).status, 'published');
 
     // Send approval email to creator
     if (movie.createdBy) {
@@ -347,7 +398,9 @@ export const approveMovie = async (request: FastifyRequest, reply: FastifyReply)
 export const rejectMovie = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const { id } = request.params as { id: string };
-    const { reason } = request.body as { reason?: string };
+    if (denyInfluencerModerationAction(request, reply)) return;
+    const body = (request.body || {}) as { reason?: string; rejectionReason?: string };
+    const reason = body.rejectionReason || body.reason;
     const currentUser = (request as any).user;
 
     const movie = await MovieModel.findByIdAndUpdate(
@@ -399,7 +452,7 @@ export const getPendingApprovals = async (request: FastifyRequest, reply: Fastif
     const limit = Math.min(100, Math.max(1, Number(query.limit || 20)));
     const skip = (page - 1) * limit;
 
-    const filter: any = { status: 'moderation' };
+    const filter: any = { status: 'moderation', ...ownershipClause(request) };
 
     const [movies, total] = await Promise.all([
       MovieModel.find(filter)
@@ -427,7 +480,7 @@ export const deleteMovie = async (request: FastifyRequest, reply: FastifyReply) 
   try {
     const { id } = request.params as { id: string };
 
-    const movie = await MovieModel.findByIdAndDelete(id);
+    const movie = await MovieModel.findOneAndDelete({ _id: id, ...ownershipClause(request) });
 
     if (!movie) {
       return reply.status(404).send({ success: false, error: 'Movie not found' });
@@ -446,14 +499,32 @@ export const deleteMovie = async (request: FastifyRequest, reply: FastifyReply) 
 export const updateMovieStatus = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const { id } = request.params as { id: string };
-    const { status, rejectionReason } = request.body as {
+    const { status, rejectionReason, copyrightAttested } = request.body as {
       status: 'published' | 'draft' | 'processing' | 'moderation' | 'rejected';
       rejectionReason?: string;
+      copyrightAttested?: boolean;
     };
+
+    if (blockInfluencerEditorial(request, reply, { status })) return;
+
+    const existing = await MovieModel.findOne({ _id: id, ...ownershipClause(request) }).lean();
+    if (!existing) {
+      return reply.status(404).send({ success: false, error: 'Movie not found' });
+    }
 
     const updateData: any = { status };
     if (rejectionReason && status === 'rejected') {
       updateData.rejectionReason = rejectionReason;
+    }
+    if (isInfluencerRequest(request) && status === 'moderation') {
+      if (copyrightAttested !== true) {
+        return reply.status(400).send({ success: false, error: 'Copyright attestation is required before submitting for review' });
+      }
+      const blocked = movieNotReadyReason(existing as any);
+      if (blocked) return reply.status(400).send({ success: false, error: blocked });
+      updateData.copyrightAttested = true;
+      updateData.copyrightAttestedAt = new Date();
+      updateData.submittedAt = new Date();
     }
 
     const movie = await MovieModel.findByIdAndUpdate(
@@ -464,6 +535,11 @@ export const updateMovieStatus = async (request: FastifyRequest, reply: FastifyR
 
     if (!movie) {
       return reply.status(404).send({ success: false, error: 'Movie not found' });
+    }
+
+    await notifyIfNewlyPublished('movie', movie._id, movie.title, (existing as any).status, movie.status);
+    if (isInfluencerRequest(request) && status === 'moderation') {
+      await notifyAdminsOfSubmission('Movie', movie.title);
     }
 
     return reply.send({
@@ -482,6 +558,7 @@ export const updateMovieStatus = async (request: FastifyRequest, reply: FastifyR
 // Toggle featured status
 export const toggleFeatured = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
+    if (denyInfluencerModerationAction(request, reply)) return;
     const { id } = request.params as { id: string };
 
     const movie = await MovieModel.findById(id).lean();
@@ -512,6 +589,7 @@ export const toggleFeatured = async (request: FastifyRequest, reply: FastifyRepl
 // Toggle trending status
 export const toggleTrending = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
+    if (denyInfluencerModerationAction(request, reply)) return;
     const { id } = request.params as { id: string };
 
     const movie = await MovieModel.findById(id).lean();
@@ -540,9 +618,49 @@ export const toggleTrending = async (request: FastifyRequest, reply: FastifyRepl
 };
 
 // Get movie HLS processing status — lightweight polling endpoint for admin panel
+export const submitMovieForReview = async (request: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { id } = request.params as { id: string };
+    const body = (request.body || {}) as { copyrightAttested?: boolean };
+    const movie = await MovieModel.findOne({ _id: id, ...ownershipClause(request) });
+    if (!movie) return reply.status(404).send({ success: false, error: 'Movie not found' });
+    if (movie.status === 'published') {
+      return reply.status(400).send({ success: false, error: 'This title is already published' });
+    }
+    if (movie.status === 'moderation') {
+      return reply.status(400).send({ success: false, error: 'This title is already waiting for review' });
+    }
+    if (body.copyrightAttested !== true) {
+      return reply.status(400).send({ success: false, error: 'Copyright attestation is required before submitting for review' });
+    }
+    const blocked = movieNotReadyReason(movie);
+    if (blocked) return reply.status(400).send({ success: false, error: blocked });
+
+    movie.status = 'moderation';
+    movie.copyrightAttested = true;
+    movie.copyrightAttestedAt = new Date();
+    movie.submittedAt = new Date();
+    await movie.save();
+    await notifyAdminsOfSubmission('Movie', movie.title);
+
+    return reply.send({
+      success: true,
+      message: 'Submitted for review',
+      data: { ...movie.toObject(), id: movie._id.toString() },
+    });
+  } catch (error: any) {
+    logger.error({ error }, 'Error submitting movie for review');
+    return reply.status(500).send({ success: false, error: error.message });
+  }
+};
+
 export const getMovieProcessingStatus = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const { id } = request.params as { id: string };
+    if (isInfluencerRequest(request)) {
+      const owned = await MovieModel.findOne({ _id: id, ...ownershipClause(request) }).select('_id').lean();
+      if (!owned) return reply.status(404).send({ success: false, error: 'Movie not found' });
+    }
 
     const movie = await MovieModel.findById(id)
       .select('processingStatus processingError hlsUrl videoQualities status title')
