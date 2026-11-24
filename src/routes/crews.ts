@@ -10,7 +10,7 @@ import {
 } from '../controllers/crewController';
 
 const crewsRoutes: FastifyPluginAsync = async (fastify) => {
-  // List all crew members with pagination
+  // Crew people share the directors permission module. There is no separate crews key.
   fastify.get('/', { onRequest: [requirePermission('directors', 'canView')] }, listCrews);
 
   // Get crew member by ID

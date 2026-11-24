@@ -63,6 +63,11 @@ export interface ITVShow extends Document {
   producer?: string;
   studio?: string;
   country?: string;
+  countryId?: mongoose.Types.ObjectId;
+  crewMembers?: Array<{
+    crew: mongoose.Types.ObjectId;
+    role?: string;
+  }>;
   tags: string[];
   imdbRating?: number;
   maturityContent: string[];
@@ -141,6 +146,8 @@ const TVShowSchema = new Schema<ITVShow>(
     producer: String,
     studio: String,
     country: String,
+    countryId: { type: Schema.Types.ObjectId, ref: 'Country' },
+    crewMembers: [{ crew: { type: Schema.Types.ObjectId, ref: 'Crew' }, role: String }],
     tags: { type: [String], default: [] },
     imdbRating: { type: Number, min: 0, max: 10 },
     maturityContent: { type: [String], default: [] },

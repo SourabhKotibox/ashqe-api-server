@@ -12,6 +12,7 @@ import { logger } from './lib/logger';
 import { connectMongoDB } from './lib/mongodb';
 import { connectRedis } from './lib/redis';
 import { seedDatabase } from './lib/seed';
+import { syncCreatorCatalogPermissions } from './lib/creatorAccess';
 
 const rawPort = process.env.PORT;
 
@@ -28,6 +29,13 @@ if (Number.isNaN(port) || port <= 0) {
 async function startServer() {
   try {
     await Promise.all([connectMongoDB(), connectRedis()]);
+
+    try {
+      const synced = await syncCreatorCatalogPermissions();
+      logger.info(synced, 'Synced creator catalog permissions');
+    } catch (err) {
+      logger.error({ err }, 'Creator catalog permission sync failed');
+    }
 
     // Seed database with initial data (Disabled on startup to preserve data)
     // await seedDatabase();

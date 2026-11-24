@@ -15,6 +15,7 @@ import {
   ownershipClause,
   tvShowNotReadyReason,
 } from '../lib/creatorAccess';
+import { normalizeContentReferences } from '../lib/contentReferences';
 
 const syncSections = async (contentIdStr: string, sections: string[] | undefined) => {
   await SectionModel.updateMany(
@@ -179,6 +180,9 @@ export const createTVShow = async (request: FastifyRequest, reply: FastifyReply)
       }
     }
 
+    const referenceError = await normalizeContentReferences(body);
+    if (referenceError) return reply.status(400).send({ success: false, error: referenceError });
+
     // Check if the uploaded video is a raw MP4 or local media file
     const isLocalPath = body.hlsUrl && !body.hlsUrl.startsWith('http://') && !body.hlsUrl.startsWith('https://');
     const isRawLocalVideo = isLocalPath && !body.hlsUrl.endsWith('.m3u8');
@@ -271,6 +275,9 @@ export const updateTVShow = async (request: FastifyRequest, reply: FastifyReply)
       delete body.featured;
       delete body.trending;
     }
+
+    const referenceError = await normalizeContentReferences(body);
+    if (referenceError) return reply.status(400).send({ success: false, error: referenceError });
 
     // Check if the hlsUrl has changed to a new raw MP4
     const isLocalPath = body.hlsUrl && !body.hlsUrl.startsWith('http://') && !body.hlsUrl.startsWith('https://');

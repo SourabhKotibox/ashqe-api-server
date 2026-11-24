@@ -5,19 +5,31 @@ import { TVShowModel } from '../models/TVShow';
 import { EpisodeModel } from '../models/Episode';
 import { NotificationModel } from '../models/Notification';
 import { AdminNotificationModel } from '../models/AdminNotification';
+import { AdminUserModel } from '../models/AdminUser';
 import { logger } from './logger';
 
 const NONE = { canView: false, canCreate: false, canEdit: false, canDelete: false };
+const CATALOG = { canView: true, canCreate: true, canEdit: true, canDelete: true };
+
+/**
+ * Catalog modules a creator can list and extend.
+ * Edit/delete are granted here and then limited to rows the creator owns.
+ * Crew people use the directors module (there is no separate crews key).
+ */
+export const CREATOR_CATALOG_PERMISSIONS = {
+  genres: { ...CATALOG },
+  actors: { ...CATALOG },
+  directors: { ...CATALOG },
+  languages: { ...CATALOG },
+  countries: { ...CATALOG },
+};
 
 /** Tight default pack for a newly approved creator. Admin-only modules stay off. */
 export const CREATOR_MODULE_PERMISSIONS = {
   users: { ...NONE },
   movies: { canView: true, canCreate: true, canEdit: true, canDelete: false },
   tvShows: { canView: true, canCreate: true, canEdit: true, canDelete: false },
-  genres: { ...NONE },
-  actors: { ...NONE },
-  directors: { ...NONE },
-  languages: { ...NONE },
+  ...CREATOR_CATALOG_PERMISSIONS,
   categories: { ...NONE },
   mediaLibrary: { canView: true, canUpload: true, canDelete: false },
   banners: { ...NONE },
@@ -47,6 +59,40 @@ export const creatorQuotaConfig = () => ({
   maxUploadSizeBytes: num('CREATOR_MAX_UPLOAD_BYTES', 2 * 1024 * 1024 * 1024),
   maxPendingSubmissions: num('CREATOR_MAX_PENDING_SUBMISSIONS', 10),
 });
+
+export const creatorCatalogLimits = () => ({
+  createsPerHour: num('CREATOR_CATALOG_CREATES_PER_HOUR', 30),
+  maxPerType: num('CREATOR_CATALOG_MAX_PER_TYPE', 100),
+});
+
+/**
+ * modulePermissions are stored on each AdminUser, not derived from the role.
+ * Approval copies CREATOR_MODULE_PERMISSIONS onto the new account. This sync
+ * turns on the catalog flags for influencer accounts that were approved earlier.
+ * It only sets those flags to true, so it does not revoke other modules.
+ * Idempotent: running it again is a no-op once the flags are already on.
+ * Also available as `npx tsx scripts/sync-creator-permissions.ts`.
+ */
+export const syncCreatorCatalogPermissions = async () => {
+  const $set: Record<string, boolean> = {};
+  const needsGrant: Record<string, unknown>[] = [];
+  for (const [moduleName, actions] of Object.entries(CREATOR_CATALOG_PERMISSIONS)) {
+    for (const [action, allowed] of Object.entries(actions)) {
+      if (!allowed) continue;
+      const path = `modulePermissions.${moduleName}.${action}`;
+      $set[path] = true;
+      needsGrant.push({ [path]: { $ne: true } });
+    }
+  }
+  const result = await AdminUserModel.updateMany(
+    { role: 'influencer', $or: needsGrant },
+    { $set }
+  );
+  return {
+    matched: result.matchedCount ?? 0,
+    modified: result.modifiedCount ?? 0,
+  };
+};
 
 export const requestUserId = (request: FastifyRequest): string => {
   const admin = (request as any).adminUser;

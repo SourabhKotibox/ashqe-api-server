@@ -15,7 +15,8 @@
     "seed:branding": "tsx scripts/reset-ashqe-branding.ts",
     "seed:users": "node scripts/seed-platform-users.mjs",
     "test": "tsx --test tests/*.test.ts",
-    "seed:partner-demo": "tsx scripts/seed-partner-demo.ts"
+    "seed:partner-demo": "tsx scripts/seed-partner-demo.ts",
+    "sync:creator-permissions": "tsx scripts/sync-creator-permissions.ts"
   },
   "dependencies": {
     "@aws-sdk/client-mediaconvert": "^3.1095.0",
