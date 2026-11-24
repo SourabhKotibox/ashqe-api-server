@@ -16,6 +16,30 @@ const emptyCounts = () => ({
   total: 0,
 });
 
+const mapRecent = (
+  row: { _id: Types.ObjectId; title: string; status: string; views?: number; updatedAt: Date; rejectionReason?: string },
+  type: 'movie' | 'tvShow'
+) => {
+  const item: {
+    id: string;
+    title: string;
+    type: 'movie' | 'tvShow';
+    status: string;
+    views: number;
+    updatedAt: Date;
+    rejectionReason?: string;
+  } = {
+    id: row._id.toString(),
+    title: row.title,
+    type,
+    status: row.status,
+    views: row.views || 0,
+    updatedAt: row.updatedAt,
+  };
+  if (row.rejectionReason) item.rejectionReason = row.rejectionReason;
+  return item;
+};
+
 const summarize = async (model: typeof MovieModel | typeof TVShowModel, userId: Types.ObjectId) => {
   const rows = await model.aggregate([
     { $match: { createdBy: userId } },
@@ -53,32 +77,18 @@ export const getCreatorDashboard = async (request: FastifyRequest, reply: Fastif
       MovieModel.find({ createdBy: ownerId })
         .sort({ updatedAt: -1 })
         .limit(8)
-        .select('title status views updatedAt createdAt')
+        .select('title status views updatedAt createdAt rejectionReason')
         .lean(),
       TVShowModel.find({ createdBy: ownerId })
         .sort({ updatedAt: -1 })
         .limit(8)
-        .select('title status views updatedAt createdAt')
+        .select('title status views updatedAt createdAt rejectionReason')
         .lean(),
     ]);
 
     const recentSubmissions = [
-      ...recentMovies.map((row) => ({
-        id: row._id.toString(),
-        title: row.title,
-        type: 'movie' as const,
-        status: row.status,
-        views: row.views || 0,
-        updatedAt: row.updatedAt,
-      })),
-      ...recentShows.map((row) => ({
-        id: row._id.toString(),
-        title: row.title,
-        type: 'tvShow' as const,
-        status: row.status,
-        views: row.views || 0,
-        updatedAt: row.updatedAt,
-      })),
+      ...recentMovies.map((row) => mapRecent(row, 'movie')),
+      ...recentShows.map((row) => mapRecent(row, 'tvShow')),
     ]
       .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
       .slice(0, 8);

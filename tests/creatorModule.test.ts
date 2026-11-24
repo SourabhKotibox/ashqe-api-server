@@ -566,6 +566,10 @@ describe('Creator / influencer module', { concurrency: 1, timeout: 180000 }, () 
     assert.equal(data.quotas.maxPendingSubmissions, 4);
     assert.ok(Array.isArray(data.recentSubmissions));
     assert.ok(data.recentSubmissions.length >= 1);
+    const rejectedSubmission = data.recentSubmissions.find((item: { title?: string }) => item.title === 'Creator Series');
+    assert.ok(rejectedSubmission);
+    assert.equal(rejectedSubmission.status, 'rejected');
+    assert.equal(rejectedSubmission.rejectionReason, 'Episode 1 audio is missing.');
 
     const adminDash = await call('GET', '/api/creator/dashboard', adminToken);
     assert.equal(adminDash.statusCode, 403);
