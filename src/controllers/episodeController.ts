@@ -5,6 +5,7 @@ import { Types } from 'mongoose';
 import { logger } from '../lib/logger';
 import { isRawLocalVideo } from '../lib/contentResolver';
 import { assignCreatedBy, isInfluencerRequest, ownershipClause, requestUserId, sameOwner } from '../lib/creatorAccess';
+import { releaseDocumentMedia } from '../lib/uploadHandler';
 
 export const getAllEpisodes = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
@@ -229,6 +230,7 @@ export const deleteEpisode = async (request: FastifyRequest, reply: FastifyReply
     if (!episode) {
       return reply.status(404).send({ success: false, error: 'Episode not found' });
     }
+    await releaseDocumentMedia(episode);
 
     return reply.send({ success: true, message: 'Episode deleted successfully' });
   } catch (error: any) {

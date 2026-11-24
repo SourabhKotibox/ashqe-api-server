@@ -226,21 +226,21 @@ export const updateCategory = async (request: FastifyRequest, reply: FastifyRepl
 
     if (data.thumbnailFile) {
       if (existingCategory.thumbnail) {
-        uploadHandler.deleteUploadedFile(existingCategory.thumbnail);
+        await uploadHandler.deleteUploadedFile(existingCategory.thumbnail, undefined, { ignoreIds: [categoryId] });
       }
       const uploadedFile = await uploadHandler.saveFileFromPart(data.thumbnailFile, request, 'CATEGORY_THUMBNAIL');
       thumbnail = uploadedFile.filePath;
     }
     if (data.bannerFile) {
       if (existingCategory.bannerImage) {
-        uploadHandler.deleteUploadedFile(existingCategory.bannerImage);
+        await uploadHandler.deleteUploadedFile(existingCategory.bannerImage, undefined, { ignoreIds: [categoryId] });
       }
       const uploadedFile = await uploadHandler.saveFileFromPart(data.bannerFile, request, 'CATEGORY_BANNER');
       bannerImage = uploadedFile.filePath;
     }
     if (data.iconFile) {
       if (existingCategory.icon) {
-        uploadHandler.deleteUploadedFile(existingCategory.icon);
+        await uploadHandler.deleteUploadedFile(existingCategory.icon, undefined, { ignoreIds: [categoryId] });
       }
       const uploadedFile = await uploadHandler.saveFileFromPart(data.iconFile, request, 'CATEGORY_ICON');
       icon = uploadedFile.filePath;
@@ -304,9 +304,9 @@ export const deleteCategory = async (request: FastifyRequest, reply: FastifyRepl
     }
 
     // Delete associated files
-    if (category.thumbnail) uploadHandler.deleteUploadedFile(category.thumbnail);
-    if (category.bannerImage) uploadHandler.deleteUploadedFile(category.bannerImage);
-    if (category.icon) uploadHandler.deleteUploadedFile(category.icon);
+    if (category.thumbnail) await uploadHandler.deleteUploadedFile(category.thumbnail);
+    if (category.bannerImage) await uploadHandler.deleteUploadedFile(category.bannerImage);
+    if (category.icon) await uploadHandler.deleteUploadedFile(category.icon);
 
     return reply.send({ success: true, message: 'Category deleted successfully' });
   } catch (error: any) {
@@ -325,9 +325,9 @@ export const bulkDeleteCategories = async (request: FastifyRequest, reply: Fasti
     // Get all categories to delete files
     const categories = await CategoryModel.find({ _id: { $in: ids } });
     for (const category of categories) {
-      if (category.thumbnail) uploadHandler.deleteUploadedFile(category.thumbnail);
-      if (category.bannerImage) uploadHandler.deleteUploadedFile(category.bannerImage);
-      if (category.icon) uploadHandler.deleteUploadedFile(category.icon);
+      if (category.thumbnail) await uploadHandler.deleteUploadedFile(category.thumbnail, undefined, { ignoreIds: ids });
+      if (category.bannerImage) await uploadHandler.deleteUploadedFile(category.bannerImage, undefined, { ignoreIds: ids });
+      if (category.icon) await uploadHandler.deleteUploadedFile(category.icon, undefined, { ignoreIds: ids });
     }
 
     const result = await CategoryModel.deleteMany({ _id: { $in: ids } });

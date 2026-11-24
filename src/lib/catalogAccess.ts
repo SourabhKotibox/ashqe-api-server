@@ -81,13 +81,20 @@ export async function findCatalogDuplicate(
   return model.findOne(filter).lean();
 }
 
+/** "An actor" / "An item", "A director" / "A crew member". */
+export const duplicateNameMessage = (label: string) => {
+  const name = String(label || '').trim();
+  const article = /^[aeiou]/i.test(name) ? 'An' : 'A';
+  return `${article} ${name} with this name already exists`;
+};
+
 export const sendDuplicate = (
   reply: FastifyReply,
   existing: { _id?: unknown; name?: string; code?: string },
   label: string
 ) => {
   const existingId = String(existing._id || '');
-  const message = `A ${label} with this name already exists`;
+  const message = duplicateNameMessage(label);
   return reply.status(409).send({
     success: false,
     message,

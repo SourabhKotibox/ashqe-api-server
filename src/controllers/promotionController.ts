@@ -274,11 +274,11 @@ export const updatePromotion = async (request: FastifyRequest, reply: FastifyRep
       } else if (part.type === 'file') {
         if (part.fieldname === 'thumbnailFile') {
           const uploadedFile = await uploadHandler.saveFileFromPart(part, request, 'PROMOTION');
-          uploadHandler.deleteUploadedFile(existingPromotion.thumbnailUrl);
+          await uploadHandler.deleteUploadedFile(existingPromotion.thumbnailUrl, undefined, { ignoreIds: [id] });
           data.thumbnailUrl = uploadedFile.filePath;
         } else if (part.fieldname === 'videoFile') {
           const uploadedFile = await uploadHandler.saveFileFromPart(part, request, 'VIDEO');
-          uploadHandler.deleteUploadedFile(existingPromotion.videoUrl);
+          await uploadHandler.deleteUploadedFile(existingPromotion.videoUrl, undefined, { ignoreIds: [id] });
           data.videoUrl = uploadedFile.filePath;
         }
       }
@@ -324,8 +324,8 @@ export const deletePromotion = async (request: FastifyRequest, reply: FastifyRep
       return reply.status(404).send({ success: false, message: 'Promotion not found' });
     }
 
-    uploadHandler.deleteUploadedFile(promotion.thumbnailUrl);
-    uploadHandler.deleteUploadedFile(promotion.videoUrl);
+    await uploadHandler.deleteUploadedFile(promotion.thumbnailUrl);
+    await uploadHandler.deleteUploadedFile(promotion.videoUrl);
 
     return reply.status(200).send({
       success: true,
@@ -348,10 +348,10 @@ export const bulkDeletePromotions = async (request: FastifyRequest, reply: Fasti
     const promotions = await PromotionModel.find({ _id: { $in: ids } });
     
     // Delete files associated with promotions
-    promotions.forEach(promotion => {
-      uploadHandler.deleteUploadedFile(promotion.thumbnailUrl);
-      uploadHandler.deleteUploadedFile(promotion.videoUrl);
-    });
+    for (const promotion of promotions) {
+      await uploadHandler.deleteUploadedFile(promotion.thumbnailUrl, undefined, { ignoreIds: ids });
+      await uploadHandler.deleteUploadedFile(promotion.videoUrl, undefined, { ignoreIds: ids });
+    }
 
     const result = await PromotionModel.deleteMany({ _id: { $in: ids } });
 

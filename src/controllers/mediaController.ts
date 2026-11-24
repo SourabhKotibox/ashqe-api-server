@@ -7,7 +7,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { logger } from '../lib/logger';
 import uploadHandler from '../lib/uploadHandler';
-import { assignCreatedBy, creatorFileTooLargeReason, isInfluencerRequest, ownershipClause, requestUserId } from '../lib/creatorAccess';
+import { assignCreatedBy, creatorFileTooLargeReason, isInfluencerRequest, ownershipClause, requestUserId, sameOwner } from '../lib/creatorAccess';
+import { countMediaUses, inUseMessage } from '../lib/mediaReferences';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -149,13 +150,24 @@ export const deleteFolder = async (request: FastifyRequest, reply: FastifyReply)
     }
 
     const files = await MediaFileModel.find({ folder: id });
-
-    // Delete files from storage
+    const ignoreMediaFileIds = files.map((file) => file._id);
+    let inUse = 0;
     for (const file of files) {
-      await uploadHandler.deleteUploadedFile(file.filePath);
+      inUse += await countMediaUses(file.toObject(), { ignoreMediaFileIds });
+    }
+    if (inUse > 0) {
+      const message = inUseMessage(inUse, 'folder');
+      return reply.status(409).send({ success: false, error: message, message });
     }
 
-    // Delete files from DB
+    for (const file of files) {
+      await uploadHandler.deleteUploadedFile(
+        (file as any).s3Key || file.filePath,
+        (file as any).storageType,
+        { ignoreMediaFileIds }
+      );
+    }
+
     await MediaFileModel.deleteMany({ folder: id });
 
     // Delete folder from DB
@@ -483,6 +495,9 @@ export const reprocessMediaHls = async (request: FastifyRequest, reply: FastifyR
     if (!file) {
       return reply.status(404).send({ success: false, error: 'File not found' });
     }
+    if (isInfluencerRequest(request) && !sameOwner(file, requestUserId(request))) {
+      return reply.status(403).send({ success: false, error: 'You can only modify media you uploaded' });
+    }
     const isVideo = (file.fileType || '').startsWith('video/') || /\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(file.name);
     if (!isVideo) {
       return reply.status(400).send({ success: false, error: 'Only video files can be transcoded' });
@@ -529,25 +544,33 @@ export const deleteFile = async (request: FastifyRequest, reply: FastifyReply) =
       return reply.status(400).send({ success: false, error: 'Invalid file ID' });
     }
 
-    const file = await MediaFileModel.findOne({ _id: id, ...ownershipClause(request) });
+    const file = await MediaFileModel.findById(id);
     if (!file) {
       return reply.status(404).send({ success: false, error: 'File not found' });
     }
 
-    if (file.sourceId && file.contentName) {
-      return reply.status(400).send({
+    const admin = (request as any).adminUser;
+    const canDeleteAny = admin?.role === 'superadmin' || !!admin?.modulePermissions?.mediaLibrary?.canDelete;
+    if (!canDeleteAny && !sameOwner(file, requestUserId(request))) {
+      return reply.status(403).send({
         success: false,
-        error: `This file is currently in use by "${file.contentName}" (${file.contentType}). Please update or remove that content before deleting this file.`
+        error: 'You can only delete media you uploaded',
       });
     }
 
-    // Delete file from storage
+    const ignoreMediaFileIds = [file._id];
+    const inUse = await countMediaUses(file.toObject(), { ignoreMediaFileIds });
+    if (inUse > 0) {
+      const message = inUseMessage(inUse);
+      return reply.status(409).send({ success: false, error: message, message });
+    }
+
     await uploadHandler.deleteUploadedFile(
       (file as any).s3Key || file.filePath,
-      ((file as any).storageType === 's3' ? 's3' : 'local') as 'local' | 's3'
+      ((file as any).storageType === 's3' ? 's3' : 'local') as 'local' | 's3',
+      { ignoreMediaFileIds }
     );
 
-    // Delete from DB
     await MediaFileModel.findByIdAndDelete(id);
 
     return reply.send({ success: true, message: 'File deleted successfully' });

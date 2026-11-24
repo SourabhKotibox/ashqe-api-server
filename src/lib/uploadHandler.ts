@@ -10,6 +10,7 @@ import { uploadToS3, deleteFromS3, isS3Configured } from './s3';
 import { transcodeToHls } from './hlsTranscoder';
 import { logger } from './logger';
 import { ensureVttSubtitle, isSubtitleFile } from './subtitleConverter';
+import { countMediaUses, type MediaUseOptions } from './mediaReferences';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -135,6 +136,38 @@ export const validateFileType = (fileName: string, uploadType: UploadType): bool
   return (typeConfig.allowedExts as readonly string[]).includes(ext);
 };
 
+/**
+ * Reuse a stored object only when it already belongs to the same uploader.
+ * A hash match owned by someone else gets its own MediaFile and its own bytes,
+ * so one account can never be handed an id it can delete or reprocess.
+ * Same-owner reuse is safe because deletion refuses while anything still references the object.
+ */
+const findReusableMediaFile = async (
+  contentHash: string,
+  name: string,
+  fileSize: number,
+  createdBy?: string
+) => {
+  const identity: Record<string, unknown>[] = [];
+  if (contentHash) identity.push({ contentHash });
+  else if (name && fileSize > 0) identity.push({ name, fileSize });
+  if (identity.length === 0) return null;
+
+  const owner = createdBy && Types.ObjectId.isValid(String(createdBy))
+    ? { createdBy: new Types.ObjectId(String(createdBy)) }
+    : { $or: [{ createdBy: null }, { createdBy: { $exists: false } }] };
+
+  return MediaFileModel.findOne({ $and: [owner, { $or: identity }] });
+};
+
+const storedUploadPath = (value: string) => {
+  if (!value || value.length < 8 || value.length > 2000) return false;
+  if (value.includes('/uploads/')) return true;
+  return /^(media|actors|directors|videos|banners|categories|genres|languages|promotions|hls|documents)\//.test(
+    value.replace(/^\/+/, '')
+  );
+};
+
 // Helper to check if a file is a video based on file extension or mimetype
 const isVideoFile = (fileName: string, mimeType: string): boolean => {
   const videoExtensions = ['.mp4', '.webm', '.mov', '.avi', '.mkv', '.flv', '.m4v', '.mpeg', '.mpg'];
@@ -223,9 +256,12 @@ export const saveFileFromPart = async (
     }
 
     const contentHash = crypto.createHash('sha256').update(buffer).digest('hex');
-    const existingFile = await MediaFileModel.findOne({
-      $or: [{ contentHash }, { name: part.filename, fileSize: buffer.length }],
-    });
+    const existingFile = await findReusableMediaFile(
+      contentHash,
+      part.filename,
+      buffer.length,
+      options?.createdBy
+    );
 
     if (existingFile) {
       return {
@@ -324,9 +360,12 @@ export const saveFileFromPart = async (
 
         const contentHash = await computeFileHash(fullFilePath).catch(() => '');
 
-        const existingFile = await MediaFileModel.findOne({
-          $or: [{ contentHash }, { name: part.filename, fileSize: stats.size }],
-        });
+        const existingFile = await findReusableMediaFile(
+          contentHash,
+          part.filename,
+          stats.size,
+          options?.createdBy
+        );
 
         if (existingFile) {
           fs.unlinkSync(fullFilePath);
@@ -447,9 +486,13 @@ export const saveFileFromPart = async (
 
 export const deleteUploadedFile = async (
   relativeFilePath: string,
-  storageType?: 'local' | 's3'
+  storageType?: 'local' | 's3',
+  options?: MediaUseOptions
 ) => {
-  if (!relativeFilePath) return;
+  if (!relativeFilePath) return { deleted: false, inUse: 0 };
+
+  const inUse = await countMediaUses(relativeFilePath, options);
+  if (inUse > 0) return { deleted: false, inUse };
 
   const s3Configured = await isS3Configured();
   if (storageType === 's3' || (s3Configured && !relativeFilePath.includes('/uploads/'))) {
@@ -461,7 +504,40 @@ export const deleteUploadedFile = async (
       UPLOADS_ROOT,
       relativeFilePath.replace(/^\/*uploads\//, '').replace(/^\/+/, '')
     );
-    if (fs.existsSync(fullPath)) fs.unlinkSync(fullPath);
+    if (fs.existsSync(fullPath) && fs.statSync(fullPath).isFile()) fs.unlinkSync(fullPath);
+  }
+  return { deleted: true, inUse: 0 };
+};
+
+/** After a title, episode, or similar row is gone, drop storage only if nothing else still points at it. */
+export const releaseDocumentMedia = async (doc: unknown) => {
+  if (!doc || typeof doc !== 'object') return;
+  const plain = typeof (doc as { toObject?: () => unknown }).toObject === 'function'
+    ? (doc as { toObject: () => unknown }).toObject()
+    : doc;
+  const paths = new Set<string>();
+  const visit = (value: unknown) => {
+    if (typeof value === 'string') {
+      if (storedUploadPath(value)) paths.add(value);
+      return;
+    }
+    if (!value || typeof value !== 'object' || value instanceof Date) return;
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+      if (key === '_id' || key === '__v' || key === 'createdBy') continue;
+      visit(child);
+    }
+  };
+  visit(plain);
+  for (const filePath of paths) {
+    try {
+      await deleteUploadedFile(filePath);
+    } catch (err) {
+      logger.warn({ err, filePath }, 'Skipped storage cleanup for a deleted record');
+    }
   }
 };
 
