@@ -586,6 +586,67 @@ describe('Creator / influencer module', { concurrency: 1, timeout: 180000 }, () 
     process.env.CREATOR_MAX_PENDING_SUBMISSIONS = '4';
   });
 
+  test('influencers cannot list or change platform users', async () => {
+    const { UserModel } = await import('../src/models/User.ts');
+    const { AdminUserModel } = await import('../src/models/AdminUser.ts');
+    const viewer = await UserModel.create({ email: 'viewer@ashqe.test', name: 'Viewer' });
+    const userId = viewer._id.toString();
+
+    assert.equal((await call('GET', '/api/users', creatorToken)).statusCode, 403);
+    assert.equal((await call('GET', `/api/users/${userId}`, creatorToken)).statusCode, 403);
+    assert.equal((await call('PATCH', `/api/users/${userId}`, creatorToken, { name: 'Hacked' })).statusCode, 403);
+    assert.equal((await call('POST', `/api/users/${userId}/ban`, creatorToken, { reason: 'nope' })).statusCode, 403);
+    assert.equal((await call('DELETE', `/api/users/${userId}`, creatorToken)).statusCode, 403);
+    const stillThere = await UserModel.findById(userId).lean();
+    assert.equal(stillThere?.name, 'Viewer');
+    assert.equal(stillThere?.status, 'active');
+
+    const listed = await call('GET', '/api/users', adminToken);
+    assert.equal(listed.statusCode, 200);
+    const listedBody = await bodyOf(listed);
+    assert.equal(listedBody.success, true);
+    assert.ok(listedBody.pagination.total >= 1);
+
+    const patched = await call('PATCH', `/api/users/${userId}`, adminToken, { name: 'Viewer Updated' });
+    assert.equal(patched.statusCode, 200);
+    assert.equal((await bodyOf(patched)).name, 'Viewer Updated');
+
+    const banned = await call('POST', `/api/users/${userId}/ban`, adminToken, { reason: 'terms' });
+    assert.equal(banned.statusCode, 200);
+    assert.equal((await bodyOf(banned)).status, 'banned');
+
+    const removed = await call('DELETE', `/api/users/${userId}`, adminToken);
+    assert.equal(removed.statusCode, 204);
+    assert.equal(await UserModel.findById(userId).lean(), null);
+
+    const passwordHash = await bcrypt.hash('ModUsers123!', 8);
+    await AdminUserModel.create({
+      email: 'moderator-users@ashqe.test',
+      name: 'User Moderator',
+      passwordHash,
+      role: 'moderator',
+      isActive: true,
+      modulePermissions: {
+        users: { canView: true, canCreate: false, canEdit: true, canDelete: false },
+      },
+    });
+    const moderator = await bodyOf(await call('POST', '/api/auth/login', undefined, {
+      email: 'moderator-users@ashqe.test',
+      password: 'ModUsers123!',
+    }));
+    const moderatorList = await call('GET', '/api/users', moderator.accessToken);
+    assert.equal(moderatorList.statusCode, 200);
+
+    const stats = await call('GET', '/api/dashboard/stats', creatorToken);
+    assert.equal(stats.statusCode, 403);
+    const adminStats = await call('GET', '/api/dashboard/stats', adminToken);
+    assert.equal(adminStats.statusCode, 200);
+    const notes = await call('GET', '/api/admin-notifications', creatorToken);
+    assert.equal(notes.statusCode, 403);
+    const adminNotes = await call('GET', '/api/admin-notifications', adminToken);
+    assert.equal(adminNotes.statusCode, 200);
+  });
+
   test('apply rate limit returns 429', async () => {
     resetRateLimits();
     process.env.CREATOR_APPLY_IP_LIMIT = '1';
