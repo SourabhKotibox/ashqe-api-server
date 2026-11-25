@@ -35,6 +35,8 @@ export interface IAdminUser extends Document {
   role: 'superadmin' | 'admin' | 'moderator' | 'influencer';
   avatar?: string;
   phone?: string;
+  bio?: string;
+  socialLinks?: Array<{ platform: 'instagram' | 'youtube' | 'facebook' | 'x' | 'website' | 'other'; url: string }>;
   modulePermissions: IModulePermissions;
   isActive: boolean;
   mustChangePassword: boolean;
@@ -85,6 +87,19 @@ const AdminUserSchema = new Schema<IAdminUser>(
     },
     avatar: String,
     phone: String,
+    bio: { type: String, default: '', maxlength: 1000 },
+    socialLinks: {
+      type: [
+        {
+          platform: {
+            type: String,
+            enum: ['instagram', 'youtube', 'facebook', 'x', 'website', 'other'],
+          },
+          url: { type: String },
+        },
+      ],
+      default: [],
+    },
     modulePermissions: {
       type: {
         users: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },

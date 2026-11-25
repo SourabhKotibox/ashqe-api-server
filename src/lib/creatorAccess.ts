@@ -49,7 +49,7 @@ export const CREATOR_MODULE_PERMISSIONS = {
   notificationTemplates: { ...NONE },
   settings: { ...NONE },
   reviews: { ...NONE },
-  creatorRevenue: { ...NONE },
+  creatorRevenue: { canView: true, canCreate: false, canEdit: false, canDelete: false },
 };
 
 const PENDING_STATUSES = ['draft', 'processing', 'moderation'] as const;
@@ -76,6 +76,7 @@ export const creatorCatalogLimits = () => ({
  * module — the admin sidebar gates it on `actors`, and the API gates crew
  * writes on `directors`. The admin sidebar currently gates the Countries item
  * on `languages`; API country writes use `countries`. Both flags are in the pack.
+ * `earnings` is the creator's own revenue section (`creatorRevenue.canView`).
  */
 export const CREATOR_SIDEBAR_SECTIONS = [
   'dashboard',
@@ -88,6 +89,7 @@ export const CREATOR_SIDEBAR_SECTIONS = [
   'directors',
   'crew',
   'countries',
+  'earnings',
 ] as const;
 
 const moduleIsVisible = (permissions: any, moduleName: string) => {
@@ -115,6 +117,7 @@ export const sidebarSectionsFor = (role: string | undefined, permissions: any): 
   if (moduleIsVisible(permissions, 'countries') || moduleIsVisible(permissions, 'languages')) {
     sections.push('countries');
   }
+  if (moduleIsVisible(permissions, 'creatorRevenue')) sections.push('earnings');
   return sections;
 };
 

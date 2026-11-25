@@ -21,6 +21,7 @@ const CREATOR_SECTIONS = [
   'directors',
   'crew',
   'countries',
+  'earnings',
 ];
 
 const clearedPermissions = () => ({
@@ -101,6 +102,9 @@ describe('Creator approval section pack', { concurrency: 1, timeout: 180000 }, (
     assert.equal(perms.mediaLibrary.canView, true);
     assert.equal(perms.mediaLibrary.canUpload, true);
     assert.equal(perms.mediaLibrary.canDelete, false);
+    assert.equal(perms.creatorRevenue.canView, true);
+    assert.equal(perms.creatorRevenue.canEdit, false);
+    assert.equal(user.sections.includes('earnings'), true);
     for (const moduleName of ['languages', 'genres', 'actors', 'directors', 'countries'] as const) {
       assert.equal(perms[moduleName].canView, true, moduleName);
       assert.equal(perms[moduleName].canCreate, true, moduleName);
@@ -290,11 +294,68 @@ describe('Creator approval section pack', { concurrency: 1, timeout: 180000 }, (
     assert.equal(restored?.modulePermissions?.directors?.canCreate, true);
     assert.equal(restored?.modulePermissions?.users?.canView, false);
     assert.equal(restored?.modulePermissions?.settings?.canEdit, false);
+    assert.equal(restored?.modulePermissions?.creatorRevenue?.canView, true);
+    assert.notEqual(restored?.modulePermissions?.creatorRevenue?.canEdit, true);
+    const restoredMe = await bodyOf(await call('GET', '/api/auth/me', creatorToken));
+    assert.equal(restoredMe.user.sections.includes('earnings'), true);
+    assert.equal((await call('GET', '/api/creator/revenue/summary', creatorToken)).statusCode, 200);
+    assert.equal((await call('GET', '/api/admin/creator-revenue/overview', creatorToken)).statusCode, 403);
 
     const moderatorAfter = await AdminUserModel.findOne({ email: 'editor@ashqe.test' }).lean();
     assert.equal(moderatorAfter?.modulePermissions?.movies?.canView, false);
     assert.equal(moderatorAfter?.modulePermissions?.genres?.canCreate, false);
     const staffAfter = await AdminUserModel.findOne({ email: 'staff-admin@ashqe.test' }).lean();
     assert.equal(staffAfter?.modulePermissions?.movies?.canCreate, false);
+  });
+
+  test('a creator can edit their own profile and staff can read it with the application', async () => {
+    const own = await bodyOf(await call('GET', '/api/creator/profile', creatorToken));
+    assert.equal(own.success, true);
+    assert.equal(own.data.name, 'Asha Creator');
+    assert.equal(own.data.application.channelName, 'Asha Films');
+    assert.equal(own.data.application.portfolioSummary.includes('Independent films'), true);
+    assert.equal('adminNotes' in own.data.application, false);
+    assert.equal('passwordHash' in own.data, false);
+
+    const updated = await bodyOf(await call('PATCH', '/api/creator/profile', creatorToken, {
+      name: 'Asha Films',
+      bio: 'Independent films from Kochi.',
+      avatar: 'https://cdn.example.com/asha.jpg',
+      socialLinks: [
+        { platform: 'instagram', url: 'https://instagram.com/ashafilms' },
+        { platform: 'website', url: 'https://asha.example' },
+      ],
+    }));
+    assert.equal(updated.success, true);
+    assert.equal(updated.data.name, 'Asha Films');
+    assert.equal(updated.data.bio, 'Independent films from Kochi.');
+    assert.equal(updated.data.avatar, 'https://cdn.example.com/asha.jpg');
+    assert.equal(updated.data.socialLinks.length, 2);
+    assert.equal(updated.data.email, 'asha-sections@ashqe.test');
+
+    const bad = await call('PATCH', '/api/creator/profile', creatorToken, {
+      socialLinks: [{ platform: 'instagram', url: 'javascript:alert(1)' }],
+    });
+    assert.equal(bad.statusCode, 400);
+    const roleChange = await call('PATCH', '/api/creator/profile', creatorToken, { role: 'superadmin' });
+    assert.equal(roleChange.statusCode, 400);
+
+    const other = await call('GET', `/api/admin/creators/${creatorId}/profile`, otherToken);
+    assert.equal(other.statusCode, 403);
+    const editor = await bodyOf(await call('POST', '/api/auth/login', undefined, {
+      email: 'editor@ashqe.test',
+      password: 'EditorPass123!',
+    }));
+    assert.equal((await call('GET', `/api/admin/creators/${creatorId}/profile`, editor.accessToken)).statusCode, 403);
+
+    const staff = await bodyOf(await call('GET', `/api/admin/creators/${creatorId}/profile`, adminToken));
+    assert.equal(staff.success, true);
+    assert.equal(staff.data.name, 'Asha Films');
+    assert.equal(staff.data.bio, 'Independent films from Kochi.');
+    assert.equal(staff.data.application.email, 'asha-sections@ashqe.test');
+    assert.equal(staff.data.application.status, 'approved');
+    assert.equal(staff.data.application.adminNotes, '');
+    assert.equal('passwordHash' in staff.data, false);
+    assert.equal((await call('GET', '/api/admin/creators/not-an-id/profile', adminToken)).statusCode, 404);
   });
 });

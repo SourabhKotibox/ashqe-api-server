@@ -9,6 +9,11 @@ import {
   rejectCreatorApplication,
 } from '../controllers/creatorApplicationController';
 import { getCreatorDashboard } from '../controllers/creatorDashboardController';
+import {
+  getCreatorProfileForStaff,
+  getOwnCreatorProfile,
+  updateOwnCreatorProfile,
+} from '../controllers/creatorProfileController';
 
 /**
  * Creator / influencer module.
@@ -26,6 +31,10 @@ const creatorRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.post('/admin/creator-applications/:id/reject', edit, rejectCreatorApplication);
 
   fastify.get('/creator/dashboard', { onRequest: [authenticateAndAttach] }, getCreatorDashboard);
+  fastify.get('/creator/profile', { onRequest: [authenticateAndAttach] }, getOwnCreatorProfile);
+  fastify.patch('/creator/profile', { onRequest: [authenticateAndAttach] }, updateOwnCreatorProfile);
+
+  fastify.get('/admin/creators/:id/profile', view, getCreatorProfileForStaff);
 };
 
 export default creatorRoutes;
