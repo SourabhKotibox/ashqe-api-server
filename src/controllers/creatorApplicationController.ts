@@ -270,6 +270,8 @@ export const approveCreatorApplication = async (request: FastifyRequest, reply: 
     const temporaryPassword = generateTemporaryPassword();
     const passwordHash = await bcrypt.hash(temporaryPassword, 10);
 
+    // No per-creator revenue row is written here. Until a super admin sets an
+    // override, this creator earns at the global default watch-hour rate.
     const adminUser = await AdminUserModel.create({
       email,
       name: application.fullName,

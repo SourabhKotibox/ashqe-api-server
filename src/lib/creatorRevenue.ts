@@ -1,8 +1,10 @@
 /**
  * Creator revenue is INR per watch hour.
  *
- * Rate policy: seconds are valued at the rate in effect when they are credited
- * (server receipt time). A change appends a CreatorRevenueRate row and does not
+ * Rate policy: each creator has their own INR per watch hour. A creator with no
+ * override uses the global default (what a newly approved creator starts on).
+ * Seconds are valued at that creator's resolved rate when they are credited.
+ * Changing a creator's rate or the default appends a history row and does not
  * rewrite CreatorWatchCredit or CreatorRevenueDaily rows already stored.
  * Earnings are summed from earning units (creditedSeconds * paise-per-hour),
  * then converted to paise, so many small credits still add up to the hourly rate.
@@ -20,7 +22,7 @@ export const REVENUE_TIMEZONE = 'Asia/Kolkata';
 export const REVENUE_CURRENCY = 'INR';
 
 export const RATE_POLICY =
-  'Watch time is valued at the INR rate in effect when the seconds are credited. Changing the rate appends a new history row from that moment and does not rewrite credits or daily totals already recorded.';
+  'Each creator earns at their own INR rate per watch hour. A creator without an override uses the global default, which is the rate applied when a creator is approved. Watch time is valued at that creator\'s resolved rate when the seconds are credited. Changing a creator\'s rate or the default appends a history row from that moment and does not rewrite credits or daily totals already recorded.';
 
 export const REVENUE_LIMITS = {
   /** A single report cannot mint more than this many seconds. Players should heartbeat about every 15s and on pause. */

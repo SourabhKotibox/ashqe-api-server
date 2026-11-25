@@ -244,9 +244,10 @@ export const requireCreatorReviewer = (action: 'canView' | 'canEdit' = 'canView'
 
 /**
  * Creator revenue admin.
- * Superadmin and admin are allowed. Other staff need creatorRevenue on their account.
+ * Viewing is open to superadmin, admin, or creatorRevenue.canView / canEdit.
+ * Changing a rate is open to superadmin or creatorRevenue.canEdit only.
  * Influencer accounts are always rejected, even if that flag is turned on, so a creator
- * cannot open the cross-creator overview.
+ * cannot open the cross-creator overview or edit any rate.
  */
 export const requireCreatorRevenueAccess = (action: 'canView' | 'canEdit') => {
   return async (request: FastifyRequest, reply: FastifyReply) => {
@@ -266,11 +267,10 @@ export const requireCreatorRevenueAccess = (action: 'canView' | 'canEdit') => {
         return reply.status(403).send({ success: false, error: 'Forbidden — Creators can only view their own revenue' });
       }
 
-      const isStaffAdmin = user.role === 'admin' || user.role === 'superadmin';
       const perms = (user.modulePermissions as any)?.creatorRevenue;
       const allowed = action === 'canView'
-        ? isStaffAdmin || !!perms?.canView || !!perms?.canEdit
-        : isStaffAdmin || !!perms?.canEdit;
+        ? user.role === 'superadmin' || user.role === 'admin' || !!perms?.canView || !!perms?.canEdit
+        : user.role === 'superadmin' || !!perms?.canEdit;
       if (!allowed) {
         return reply.status(403).send({ success: false, error: `Forbidden — creatorRevenue.${action} permission required` });
       }

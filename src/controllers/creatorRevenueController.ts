@@ -8,9 +8,11 @@ import {
   creatorRevenueSeries,
   creatorRevenueSummary,
   creatorRevenueTitles,
+  getCreatorRatePayload,
   getRatePayload,
   logRevenueFailure,
   recordCreatorPlayback,
+  setCreatorWatchHourRate,
   setWatchHourRate,
 } from '../lib/creatorRevenueLedger';
 
@@ -124,7 +126,7 @@ export const getCreatorRevenueSummary = async (request: FastifyRequest, reply: F
     const data = await creatorRevenueSummary(creatorId, period.period);
     return reply.send({ success: true, data });
   } catch (error: any) {
-    if (error instanceof RevenueValidationError) return reply.status(400).send({ success: false, error: error.message });
+    if (error instanceof RevenueValidationError) return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
     logRevenueFailure(error, 'Error building creator revenue summary');
     return reply.status(500).send({ success: false, error: 'Failed to load revenue summary' });
   }
@@ -145,7 +147,7 @@ export const getCreatorRevenueTitles = async (request: FastifyRequest, reply: Fa
     const { pagination, ...rest } = data;
     return reply.send({ success: true, data: rest, pagination });
   } catch (error: any) {
-    if (error instanceof RevenueValidationError) return reply.status(400).send({ success: false, error: error.message });
+    if (error instanceof RevenueValidationError) return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
     logRevenueFailure(error, 'Error building creator revenue titles');
     return reply.status(500).send({ success: false, error: 'Failed to load revenue titles' });
   }
@@ -163,13 +165,48 @@ export const getCreatorRevenueSeries = async (request: FastifyRequest, reply: Fa
     const data = await creatorRevenueSeries(creatorId, period.period);
     return reply.send({ success: true, data });
   } catch (error: any) {
-    if (error instanceof RevenueValidationError) return reply.status(400).send({ success: false, error: error.message });
+    if (error instanceof RevenueValidationError) return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
     logRevenueFailure(error, 'Error building creator revenue series');
     return reply.status(500).send({ success: false, error: 'Failed to load revenue series' });
   }
 };
 
-/** GET /api/admin/creator-revenue/rate */
+/** GET /api/admin/creator-revenue/creators/:creatorId/rate */
+export const getCreatorWatchHourRate = async (request: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { creatorId } = request.params as { creatorId: string };
+    return reply.send({ success: true, data: await getCreatorRatePayload(creatorId) });
+  } catch (error: any) {
+    if (error instanceof RevenueValidationError) return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
+    logRevenueFailure(error, 'Error reading a creator watch-hour rate');
+    return reply.status(500).send({ success: false, error: 'Failed to load the creator watch-hour rate' });
+  }
+};
+
+/** PUT /api/admin/creator-revenue/creators/:creatorId/rate */
+export const putCreatorWatchHourRate = async (request: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const { creatorId } = request.params as { creatorId: string };
+    const parsed = rateSchema.safeParse(request.body || {});
+    if (!parsed.success) {
+      return reply.status(400).send({ success: false, error: 'Validation failed', errors: parsed.error.flatten().fieldErrors });
+    }
+    const admin = (request as any).adminUser;
+    await setCreatorWatchHourRate({
+      creatorId,
+      rateInrPerHour: parsed.data.rateInrPerHour,
+      note: parsed.data.note,
+      setBy: String(admin?._id || admin?.id || ''),
+    });
+    return reply.send({ success: true, data: await getCreatorRatePayload(creatorId) });
+  } catch (error: any) {
+    if (error instanceof RevenueValidationError) return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
+    logRevenueFailure(error, 'Error updating a creator watch-hour rate');
+    return reply.status(500).send({ success: false, error: 'Failed to update the creator watch-hour rate' });
+  }
+};
+
+/** GET /api/admin/creator-revenue/rate — global default */
 export const getCreatorRevenueRate = async (_request: FastifyRequest, reply: FastifyReply) => {
   try {
     return reply.send({ success: true, data: await getRatePayload() });
@@ -194,7 +231,7 @@ export const putCreatorRevenueRate = async (request: FastifyRequest, reply: Fast
     });
     return reply.send({ success: true, data: await getRatePayload() });
   } catch (error: any) {
-    if (error instanceof RevenueValidationError) return reply.status(400).send({ success: false, error: error.message });
+    if (error instanceof RevenueValidationError) return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
     logRevenueFailure(error, 'Error updating creator revenue rate');
     return reply.status(500).send({ success: false, error: 'Failed to update the watch-hour rate' });
   }
@@ -218,7 +255,7 @@ export const getCreatorRevenueOverview = async (request: FastifyRequest, reply: 
     const { pagination, ...rest } = data;
     return reply.send({ success: true, data: rest, pagination });
   } catch (error: any) {
-    if (error instanceof RevenueValidationError) return reply.status(400).send({ success: false, error: error.message });
+    if (error instanceof RevenueValidationError) return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
     logRevenueFailure(error, 'Error building creator revenue overview');
     return reply.status(500).send({ success: false, error: 'Failed to load revenue overview' });
   }

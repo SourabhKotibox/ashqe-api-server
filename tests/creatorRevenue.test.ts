@@ -185,6 +185,7 @@ describe('creator revenue ledger and API', { concurrency: 1, timeout: 300000 }, 
   let app: { inject: (opts: any) => Promise<any>; ready: () => Promise<unknown>; close: () => Promise<void> };
   let recordCreatorPlayback: typeof import('../src/lib/creatorRevenueLedger.ts').recordCreatorPlayback;
   let setWatchHourRate: typeof import('../src/lib/creatorRevenueLedger.ts').setWatchHourRate;
+  let setCreatorWatchHourRate: typeof import('../src/lib/creatorRevenueLedger.ts').setCreatorWatchHourRate;
   let MovieModel: typeof import('../src/models/Movie.ts').MovieModel;
   let TVShowModel: typeof import('../src/models/TVShow.ts').TVShowModel;
   let EpisodeModel: typeof import('../src/models/Episode.ts').EpisodeModel;
@@ -267,7 +268,7 @@ describe('creator revenue ledger and API', { concurrency: 1, timeout: 300000 }, 
     await mongoose.connect(mongod.getUri());
     app = (await import('../src/app.ts')).default;
     await app.ready();
-    ({ recordCreatorPlayback, setWatchHourRate } = await import('../src/lib/creatorRevenueLedger.ts'));
+    ({ recordCreatorPlayback, setWatchHourRate, setCreatorWatchHourRate } = await import('../src/lib/creatorRevenueLedger.ts'));
     ({ MovieModel } = await import('../src/models/Movie.ts'));
     ({ TVShowModel } = await import('../src/models/TVShow.ts'));
     ({ EpisodeModel } = await import('../src/models/Episode.ts'));
@@ -656,7 +657,7 @@ describe('creator revenue ledger and API', { concurrency: 1, timeout: 300000 }, 
     assert.ok(series.data.points[0].watchSeconds > 0);
   });
 
-  test('permissions keep creators on their own data and let admins set the rate', async () => {
+  test('permissions keep creators on their own data and limit rate changes to superadmin or creatorRevenue.canEdit', async () => {
     const noToken = await call('GET', '/api/admin/creator-revenue/overview');
     assert.equal(noToken.statusCode, 401);
     const creatorOverview = await call('GET', '/api/admin/creator-revenue/overview', creatorAToken);
@@ -684,14 +685,41 @@ describe('creator revenue ledger and API', { concurrency: 1, timeout: 300000 }, 
       note: 'Moderator adjustment',
     }));
     assert.equal(modUpdated.success, true);
+    assert.equal(modUpdated.data.scope, 'default');
     assert.equal(modUpdated.data.rateInrPerHour, 6);
     assert.equal(modUpdated.data.currency, 'INR');
     assert.match(modUpdated.data.ratePolicy, /does not rewrite/i);
 
-    const badRate = await call('PUT', '/api/admin/creator-revenue/rate', staffAdminToken, { rateInrPerHour: 5.555 });
+    const staffDefault = await call('PUT', '/api/admin/creator-revenue/rate', staffAdminToken, { rateInrPerHour: 8 });
+    assert.equal(staffDefault.statusCode, 403);
+    const staffCreatorRate = await call('PUT', `/api/admin/creator-revenue/creators/${creatorAId}/rate`, staffAdminToken, { rateInrPerHour: 8 });
+    assert.equal(staffCreatorRate.statusCode, 403);
+    const creatorOwnRate = await call('PUT', `/api/admin/creator-revenue/creators/${creatorAId}/rate`, creatorAToken, { rateInrPerHour: 9 });
+    assert.equal(creatorOwnRate.statusCode, 403);
+    const badRate = await call('PUT', '/api/admin/creator-revenue/rate', adminToken, { rateInrPerHour: 5.555 });
     assert.equal(badRate.statusCode, 400);
-    const staffUpdated = await bodyOf(await call('PUT', '/api/admin/creator-revenue/rate', staffAdminToken, { rateInrPerHour: 8 }));
-    assert.equal(staffUpdated.data.rateInrPerHour, 8);
+    const missingCreator = await call('PUT', `/api/admin/creator-revenue/creators/${adminId}/rate`, adminToken, { rateInrPerHour: 4 });
+    assert.equal(missingCreator.statusCode, 404);
+
+    const creatorRateSet = await bodyOf(await call('PUT', `/api/admin/creator-revenue/creators/${creatorAId}/rate`, adminToken, {
+      rateInrPerHour: 11,
+      note: 'A only',
+    }));
+    assert.equal(creatorRateSet.success, true);
+    assert.equal(creatorRateSet.data.scope, 'creator');
+    assert.equal(creatorRateSet.data.creatorId, creatorAId);
+    assert.equal(creatorRateSet.data.rateInrPerHour, 11);
+    assert.equal(creatorRateSet.data.source, 'override');
+    assert.equal(creatorRateSet.data.defaultRate.rateInrPerHour, 6);
+    assert.equal(creatorRateSet.data.history[0].rateInrPerHour, 11);
+    assert.equal(creatorRateSet.data.history[0].note, 'A only');
+
+    const summaryARate = await bodyOf(await call('GET', '/api/creator/revenue/summary?period=all', creatorAToken));
+    assert.equal(summaryARate.data.rate.rateInrPerHour, 11);
+    assert.equal(summaryARate.data.rate.source, 'override');
+    const summaryBRate = await bodyOf(await call('GET', '/api/creator/revenue/summary?period=all', creatorBToken));
+    assert.equal(summaryBRate.data.rate.rateInrPerHour, 6);
+    assert.equal(summaryBRate.data.rate.source, 'default');
 
     await AdminUserModel.updateOne(
       { _id: creatorAId },
@@ -708,7 +736,12 @@ describe('creator revenue ledger and API', { concurrency: 1, timeout: 300000 }, 
     const onlyA = await bodyOf(await call('GET', `/api/admin/creator-revenue/overview?period=all&creatorId=${creatorAId}`, adminToken));
     assert.equal(onlyA.data.creators.length, 1);
     assert.equal(onlyA.data.creators[0].creatorId, creatorAId);
+    assert.equal(onlyA.data.creators[0].rateInrPerHour, 11);
+    assert.equal(onlyA.data.creators[0].rateSource, 'override');
     assert.equal(onlyA.data.totals.creatorCount, 1);
+    const creatorBRow = overview.data.creators.find((row: { creatorId: string }) => row.creatorId === creatorBId);
+    assert.equal(creatorBRow.rateInrPerHour, 6);
+    assert.equal(creatorBRow.rateSource, 'default');
 
     const badPeriod = await call('GET', '/api/creator/revenue/summary?period=custom', creatorAToken);
     assert.equal(badPeriod.statusCode, 400);
@@ -740,7 +773,8 @@ describe('creator revenue ledger and API', { concurrency: 1, timeout: 300000 }, 
     });
     assert.equal(creditedJanuary, 3600);
 
-    await setWatchHourRate({
+    await setCreatorWatchHourRate({
+      creatorId: creatorAId,
       rateInrPerHour: 10,
       setBy: adminId,
       now: new Date('2026-06-01T00:00:00.000Z'),
@@ -766,7 +800,39 @@ describe('creator revenue ledger and API', { concurrency: 1, timeout: 300000 }, 
     const januaryCredit = await CreatorWatchCreditModel.findOne({ contentId: movie._id, day: '2026-01-15' }).lean();
     assert.equal(januaryCredit?.rateInrPerHour, 5);
 
+    const defaultMovie = await MovieModel.create({
+      title: 'Default Rate Film',
+      status: 'published',
+      createdBy: creatorBId,
+      duration: 3600,
+    });
+    const defaultAugust = await recordCreatorPlayback({
+      source: 'heartbeat',
+      viewerUserId: viewerId,
+      contentId: defaultMovie._id.toString(),
+      sessionId: 'session-default-august',
+      clientEventId: 'event-default-august',
+      playedSeconds: 45,
+      positionSeconds: 45,
+      now: august,
+    });
+    assert.equal(defaultAugust.creditedSeconds, 45);
+    const defaultAugustCredit = await CreatorWatchCreditModel.findOne({ idempotencyKey: `hb:${viewerId}:event-default-august` }).lean();
+    assert.equal(defaultAugustCredit?.rateInrPerHour, 5);
+
     await setWatchHourRate({
+      rateInrPerHour: 9,
+      setBy: adminId,
+      now: new Date('2026-08-15T00:00:00.000Z'),
+      note: 'Default raised',
+    });
+    const januaryStill = await CreatorRevenueDailyModel.findOne({ titleId: movie._id, day: '2026-01-15' }).lean();
+    const augustStill = await CreatorRevenueDailyModel.findOne({ titleId: movie._id, day: '2026-08-01' }).lean();
+    assert.equal(januaryStill?.earningUnits, januaryDaily?.earningUnits);
+    assert.equal(augustStill?.earningUnits, augustDaily?.earningUnits);
+
+    await setCreatorWatchHourRate({
+      creatorId: creatorAId,
       rateInrPerHour: 12,
       setBy: adminId,
       now: new Date('2026-09-01T00:00:00.000Z'),
@@ -777,6 +843,32 @@ describe('creator revenue ledger and API', { concurrency: 1, timeout: 300000 }, 
     assert.equal(januaryAfter?.earningUnits, januaryDaily?.earningUnits);
     assert.equal(augustAfter?.earningUnits, augustDaily?.earningUnits);
     assert.equal(januaryCredit && (await CreatorWatchCreditModel.findById(januaryCredit._id).lean())?.rateInrPerHour, 5);
+
+    const september = new Date('2026-09-15T04:30:00.000Z');
+    await recordCreatorPlayback({
+      source: 'heartbeat',
+      viewerUserId: viewerId,
+      contentId: movieId,
+      sessionId: 'session-rate-september',
+      clientEventId: 'event-rate-september-a',
+      playedSeconds: 45,
+      positionSeconds: 45,
+      now: september,
+    });
+    await recordCreatorPlayback({
+      source: 'heartbeat',
+      viewerUserId: viewerId,
+      contentId: defaultMovie._id.toString(),
+      sessionId: 'session-default-september',
+      clientEventId: 'event-default-september',
+      playedSeconds: 45,
+      positionSeconds: 45,
+      now: september,
+    });
+    const septemberA = await CreatorWatchCreditModel.findOne({ idempotencyKey: `hb:${viewerId}:event-rate-september-a` }).lean();
+    const septemberB = await CreatorWatchCreditModel.findOne({ idempotencyKey: `hb:${viewerId}:event-default-september` }).lean();
+    assert.equal(septemberA?.rateInrPerHour, 12);
+    assert.equal(septemberB?.rateInrPerHour, 9);
 
     await CreatorRevenueDailyModel.updateOne(
       { _id: januaryDaily!._id },
@@ -803,7 +895,8 @@ describe('creator revenue ledger and API', { concurrency: 1, timeout: 300000 }, 
     assert.equal(generations[1].watchSeconds, 45);
     assert.equal(generations[1].payoutId, null);
 
-    await setWatchHourRate({
+    await setCreatorWatchHourRate({
+      creatorId: creatorAId,
       rateInrPerHour: 0,
       setBy: adminId,
       now: new Date('2026-10-01T00:00:00.000Z'),
@@ -823,5 +916,18 @@ describe('creator revenue ledger and API', { concurrency: 1, timeout: 300000 }, 
     const zeroRate = await CreatorWatchCreditModel.findOne({ idempotencyKey: `hb:${viewerId}:event-rate-paused-2` }).lean();
     assert.equal(zeroRate?.rateInrPerHour, 0);
     assert.equal(zeroRate?.earningUnits, 0);
+    await recordCreatorPlayback({
+      source: 'heartbeat',
+      viewerUserId: viewerId,
+      contentId: defaultMovie._id.toString(),
+      sessionId: 'session-default-october',
+      clientEventId: 'event-default-october',
+      playedSeconds: 45,
+      positionSeconds: 45,
+      now: new Date('2026-10-03T04:30:00.000Z'),
+    });
+    const defaultOctober = await CreatorWatchCreditModel.findOne({ idempotencyKey: `hb:${viewerId}:event-default-october` }).lean();
+    assert.equal(defaultOctober?.rateInrPerHour, 9);
+    assert.equal(defaultOctober?.earningUnits, earningUnitsFor(45, 9));
   });
 });

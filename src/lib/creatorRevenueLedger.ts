@@ -30,9 +30,11 @@ import {
 } from './creatorRevenue';
 
 export class RevenueValidationError extends Error {
-  constructor(message: string) {
+  statusCode: number;
+  constructor(message: string, statusCode = 400) {
     super(message);
     this.name = 'RevenueValidationError';
+    this.statusCode = statusCode;
   }
 }
 
@@ -99,59 +101,98 @@ const presentCredit = (doc: { creditedSeconds?: number; reason?: string }, dupli
   };
 };
 
+type RateSource = 'default' | 'override';
+
+type ResolvedRate = {
+  rateInrPerHour: number;
+  ratePaisePerHour: number;
+  effectiveFrom: Date;
+  note: string | null;
+  source: RateSource;
+};
+
+const mapRateHistory = (rows: Array<{
+  rateInrPerHour: number;
+  effectiveFrom: Date;
+  note?: string | null;
+  opening?: boolean;
+  setBy?: unknown;
+}>) => rows.map((row) => {
+  const setter = row.setBy as { _id?: Types.ObjectId; name?: string; email?: string } | null;
+  return {
+    rateInrPerHour: row.rateInrPerHour,
+    effectiveFrom: row.effectiveFrom,
+    note: row.note || null,
+    opening: !!row.opening,
+    setBy: setter?._id
+      ? { id: String(setter._id), name: setter.name || '', email: setter.email || '' }
+      : null,
+  };
+});
+
 export async function ensureOpeningRate() {
-  const existing = await CreatorRevenueRateModel.findOne({ opening: true }).lean();
+  const existing = await CreatorRevenueRateModel.findOne({ opening: true, creatorId: null }).lean();
   if (existing) return existing;
   try {
     return await CreatorRevenueRateModel.create({
+      creatorId: null,
       opening: true,
       rateInrPerHour: REVENUE_LIMITS.openingRateInrPerHour,
       effectiveFrom: new Date(0),
-      note: 'Opening rate of Rs 5 per watch hour',
+      note: 'Opening default of Rs 5 per watch hour',
     });
   } catch (error) {
     if (!isDuplicateKey(error)) throw error;
-    return CreatorRevenueRateModel.findOne({ opening: true }).lean();
+    return CreatorRevenueRateModel.findOne({ opening: true, creatorId: null }).lean();
   }
 }
 
-export async function getRateAt(when: Date) {
-  await ensureOpeningRate();
-  const row = await CreatorRevenueRateModel.findOne({ effectiveFrom: { $lte: when } })
+async function latestRate(filter: Record<string, unknown>, when: Date) {
+  return CreatorRevenueRateModel.findOne({ ...filter, effectiveFrom: { $lte: when } })
     .sort({ effectiveFrom: -1 })
     .lean();
+}
+
+function toResolved(row: { rateInrPerHour?: number; effectiveFrom?: Date; note?: string | null } | null, source: RateSource): ResolvedRate {
   const rateInrPerHour = row?.rateInrPerHour ?? REVENUE_LIMITS.openingRateInrPerHour;
   return {
     rateInrPerHour,
     ratePaisePerHour: ratePaisePerHour(rateInrPerHour),
     effectiveFrom: row?.effectiveFrom ?? new Date(0),
     note: row?.note ?? null,
+    source,
   };
 }
 
-export async function setWatchHourRate(input: {
-  rateInrPerHour: unknown;
-  note?: string | null;
-  setBy: string;
-  now?: Date;
-}) {
-  const rateInrPerHour = normalizeRateInr(input.rateInrPerHour);
-  if (rateInrPerHour == null) {
-    throw new RevenueValidationError('rateInrPerHour must be a number from 0 to 100000 with at most 2 decimal places');
-  }
-  const setBy = asId(input.setBy);
-  if (!setBy) throw new RevenueValidationError('A signed-in admin is required to set the rate');
+/** Creator override in effect at `when`, otherwise the global default in effect then. */
+export async function getRateAt(when: Date, creatorId?: string | Types.ObjectId | null) {
   await ensureOpeningRate();
-  const note = String(input.note || '').trim().slice(0, 240);
-  let effectiveFrom = input.now ?? new Date();
+  const ownerId = creatorId ? asId(creatorId) : null;
+  if (ownerId) {
+    const override = await latestRate({ creatorId: ownerId }, when);
+    if (override) return toResolved(override, 'override');
+  }
+  const fallback = await latestRate({ creatorId: null }, when);
+  return toResolved(fallback, 'default');
+}
+
+async function insertRate(input: {
+  creatorId: Types.ObjectId | null;
+  rateInrPerHour: number;
+  note?: string;
+  setBy: Types.ObjectId;
+  effectiveFrom: Date;
+}) {
+  let effectiveFrom = input.effectiveFrom;
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
       return await CreatorRevenueRateModel.create({
+        creatorId: input.creatorId,
         opening: false,
-        rateInrPerHour,
+        rateInrPerHour: input.rateInrPerHour,
         effectiveFrom,
-        setBy,
-        note: note || undefined,
+        setBy: input.setBy,
+        note: input.note,
       });
     } catch (error) {
       if (!isDuplicateKey(error) || attempt === 2) throw error;
@@ -161,32 +202,123 @@ export async function setWatchHourRate(input: {
   throw new RevenueValidationError('Could not record the rate');
 }
 
+function parseRateChange(input: { rateInrPerHour: unknown; note?: string | null; setBy: string; now?: Date }) {
+  const rateInrPerHour = normalizeRateInr(input.rateInrPerHour);
+  if (rateInrPerHour == null) {
+    throw new RevenueValidationError('rateInrPerHour must be a number from 0 to 100000 with at most 2 decimal places');
+  }
+  const setBy = asId(input.setBy);
+  if (!setBy) throw new RevenueValidationError('A signed-in admin is required to set the rate');
+  const note = String(input.note || '').trim().slice(0, 240);
+  return { rateInrPerHour, setBy, note: note || undefined, effectiveFrom: input.now ?? new Date() };
+}
+
+/** Append a global default. Creators who already have an override are unchanged. */
+export async function setWatchHourRate(input: {
+  rateInrPerHour: unknown;
+  note?: string | null;
+  setBy: string;
+  now?: Date;
+}) {
+  const change = parseRateChange(input);
+  await ensureOpeningRate();
+  return insertRate({ ...change, creatorId: null });
+}
+
+/** Append this creator's own rate. Later default changes do not apply to them. */
+export async function setCreatorWatchHourRate(input: {
+  creatorId: string;
+  rateInrPerHour: unknown;
+  note?: string | null;
+  setBy: string;
+  now?: Date;
+}) {
+  const creatorId = asId(input.creatorId);
+  if (!creatorId) throw new RevenueValidationError('Invalid creatorId');
+  const creator = await AdminUserModel.findById(creatorId).select('role isActive').lean();
+  if (!creator || !creator.isActive || creator.role !== 'influencer') {
+    throw new RevenueValidationError('Creator not found', 404);
+  }
+  const change = parseRateChange(input);
+  await ensureOpeningRate();
+  return insertRate({ ...change, creatorId });
+}
+
 export async function getRatePayload() {
   await ensureOpeningRate();
   const now = new Date();
   const current = await getRateAt(now);
-  const history = await CreatorRevenueRateModel.find()
+  const history = await CreatorRevenueRateModel.find({ creatorId: null })
     .sort({ effectiveFrom: -1 })
     .populate('setBy', 'name email')
     .lean();
   return {
+    scope: 'default' as const,
     currency: REVENUE_CURRENCY,
     timezone: REVENUE_TIMEZONE,
     rateInrPerHour: current.rateInrPerHour,
     effectiveFrom: current.effectiveFrom,
     ratePolicy: RATE_POLICY,
-    history: history.map((row) => {
-      const setter = row.setBy as unknown as { _id?: Types.ObjectId; name?: string; email?: string } | null;
-      return {
-        rateInrPerHour: row.rateInrPerHour,
-        effectiveFrom: row.effectiveFrom,
-        note: row.note || null,
-        opening: !!row.opening,
-        setBy: setter?._id
-          ? { id: String(setter._id), name: setter.name || '', email: setter.email || '' }
-          : null,
-      };
-    }),
+    history: mapRateHistory(history),
+  };
+}
+
+export async function getCreatorRatePayload(creatorId: string) {
+  const ownerId = asId(creatorId);
+  if (!ownerId) throw new RevenueValidationError('Invalid creatorId');
+  const creator = await AdminUserModel.findById(ownerId).select('name email role isActive').lean();
+  if (!creator || !creator.isActive || creator.role !== 'influencer') {
+    throw new RevenueValidationError('Creator not found', 404);
+  }
+  const now = new Date();
+  const [current, fallback, history] = await Promise.all([
+    getRateAt(now, ownerId),
+    getRateAt(now),
+    CreatorRevenueRateModel.find({ creatorId: ownerId }).sort({ effectiveFrom: -1 }).populate('setBy', 'name email').lean(),
+  ]);
+  return {
+    scope: 'creator' as const,
+    creatorId: ownerId.toString(),
+    name: creator.name,
+    email: creator.email,
+    currency: REVENUE_CURRENCY,
+    timezone: REVENUE_TIMEZONE,
+    rateInrPerHour: current.rateInrPerHour,
+    effectiveFrom: current.effectiveFrom,
+    source: current.source,
+    defaultRate: {
+      rateInrPerHour: fallback.rateInrPerHour,
+      effectiveFrom: fallback.effectiveFrom,
+    },
+    ratePolicy: RATE_POLICY,
+    history: mapRateHistory(history),
+  };
+}
+
+export async function resolveCurrentRates(creatorIds: Types.ObjectId[], now = new Date()) {
+  await ensureOpeningRate();
+  const [fallback, overrides] = await Promise.all([
+    latestRate({ creatorId: null }, now),
+    creatorIds.length
+      ? CreatorRevenueRateModel.aggregate<{ _id: Types.ObjectId; rateInrPerHour: number; effectiveFrom: Date }>([
+        { $match: { creatorId: { $in: creatorIds }, effectiveFrom: { $lte: now } } },
+        { $sort: { effectiveFrom: -1 } },
+        { $group: { _id: '$creatorId', rateInrPerHour: { $first: '$rateInrPerHour' }, effectiveFrom: { $first: '$effectiveFrom' } } },
+      ])
+      : Promise.resolve([]),
+  ]);
+  const byCreator = new Map(overrides.map((row) => [String(row._id), row]));
+  const fallbackRate = toResolved(fallback, 'default');
+  return (creatorId: string) => {
+    const own = byCreator.get(creatorId);
+    if (own) {
+      return { rateInrPerHour: own.rateInrPerHour, rateEffectiveFrom: own.effectiveFrom, rateSource: 'override' as const };
+    }
+    return {
+      rateInrPerHour: fallbackRate.rateInrPerHour,
+      rateEffectiveFrom: fallbackRate.effectiveFrom,
+      rateSource: 'default' as const,
+    };
   };
 }
 
@@ -479,7 +611,7 @@ export async function recordCreatorPlayback(input: RecordPlaybackInput): Promise
 
   const storeReceipt = async (reason: string, creditedSeconds: number, reserved: boolean) => {
     if (input.source !== 'heartbeat' && creditedSeconds <= 0) return zero(reason);
-    const rate = await getRateAt(now);
+    const rate = await getRateAt(now, billable.creatorId);
     const earningUnits = earningUnitsFor(creditedSeconds, rate.rateInrPerHour);
     const key = idempotencyKey || `pg:${viewerUserId.toString()}:${billable.assetId.toString()}:${sessionId}:${now.toISOString()}:${position}:${creditedSeconds}`;
     try {
@@ -735,7 +867,7 @@ export async function creatorRevenueSummary(creatorId: string, period: RevenuePe
       { $group: { _id: null, watchSeconds: { $sum: '$watchSeconds' }, earningUnits: { $sum: '$earningUnits' } } },
     ]),
     CreatorRevenueDailyModel.distinct('titleId', match),
-    getRateAt(new Date()),
+    getRateAt(new Date(), ownerId),
   ]);
   const row = totals[0] || { watchSeconds: 0, earningUnits: 0 };
   return {
@@ -746,6 +878,7 @@ export async function creatorRevenueSummary(creatorId: string, period: RevenuePe
       currency: REVENUE_CURRENCY,
       rateInrPerHour: rate.rateInrPerHour,
       effectiveFrom: rate.effectiveFrom,
+      source: rate.source,
     },
     ratePolicy: RATE_POLICY,
     ...presentMoney(row.watchSeconds || 0, row.earningUnits || 0),
@@ -823,11 +956,12 @@ export async function adminRevenueOverview(input: {
   const skip = (input.page - 1) * input.limit;
   const pageRows = creators.slice(skip, skip + input.limit);
   const pageIds = pageRows.map((row) => row._id);
-  const [titleRows, users] = await Promise.all([
+  const [titleRows, users, rateFor] = await Promise.all([
     pageIds.length ? groupedTitles({ ...match, creatorId: { $in: pageIds } }) : Promise.resolve([]),
     pageIds.length
       ? AdminUserModel.find({ _id: { $in: pageIds } }).select('name email').lean()
       : Promise.resolve([]),
+    resolveCurrentRates(pageIds),
   ]);
   const titlesByCreator = new Map<string, DailyGroup[]>();
   for (const row of titleRows) {
@@ -851,6 +985,7 @@ export async function adminRevenueOverview(input: {
         creatorId: String(row._id),
         name: user?.name || 'Unknown',
         email: user?.email || '',
+        ...rateFor(String(row._id)),
         ...presentMoney(row.watchSeconds || 0, row.earningUnits || 0),
         titles: nestTitles(titlesByCreator.get(String(row._id)) || []),
       };
