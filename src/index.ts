@@ -32,7 +32,7 @@ async function startServer() {
 
     try {
       const synced = await syncCreatorCatalogPermissions();
-      logger.info(synced, 'Synced creator catalog permissions');
+      logger.info(synced, 'Synced creator permissions');
     } catch (err) {
       logger.error({ err }, 'Creator catalog permission sync failed');
     }

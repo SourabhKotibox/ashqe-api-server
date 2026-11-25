@@ -1,11 +1,14 @@
 /**
- * Grant catalog permissions to existing influencer accounts.
- * Safe to run more than once: it only turns languages, genres, actors,
- * directors, and countries view/create/edit/delete on. Other modules are left alone.
+ * Persist the creator section pack on existing influencer accounts.
+ * Safe to run more than once: it only turns on flags that the creator pack
+ * allows (dashboard sections: media library, movies, TV shows, languages,
+ * genres, actors, directors, crew via directors, and countries).
+ * Other modules and other roles are left alone.
  *
  *   npx tsx scripts/sync-creator-permissions.ts
  *
- * The API also runs this on startup.
+ * The API also runs this on startup. Reads derive the same pack from the
+ * influencer role, so access does not wait on this script.
  */
 import 'dotenv/config';
 import mongoose from 'mongoose';
@@ -20,7 +23,7 @@ async function main() {
   }
   await mongoose.connect(ensureMongoDbName(raw));
   const result = await syncCreatorCatalogPermissions();
-  console.log('Creator catalog permissions synced', result);
+  console.log('Creator permissions synced', result);
   await mongoose.disconnect();
 }
 
