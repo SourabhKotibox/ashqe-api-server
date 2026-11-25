@@ -25,6 +25,7 @@ export interface IModulePermissions {
   notificationTemplates: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
   settings: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
   reviews: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
+  creatorRevenue: { canView: boolean; canCreate: boolean; canEdit: boolean; canDelete: boolean };
 }
 
 export interface IAdminUser extends Document {
@@ -34,6 +35,8 @@ export interface IAdminUser extends Document {
   role: 'superadmin' | 'admin' | 'moderator' | 'influencer';
   avatar?: string;
   phone?: string;
+  bio?: string;
+  socialLinks?: Array<{ platform: 'instagram' | 'youtube' | 'facebook' | 'x' | 'website' | 'other'; url: string }>;
   modulePermissions: IModulePermissions;
   isActive: boolean;
   mustChangePassword: boolean;
@@ -69,6 +72,7 @@ const defaultModulePermissions: IModulePermissions = {
   notificationTemplates: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   settings: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   reviews: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+  creatorRevenue: { canView: false, canCreate: false, canEdit: false, canDelete: false },
 };
 
 const AdminUserSchema = new Schema<IAdminUser>(
@@ -83,6 +87,19 @@ const AdminUserSchema = new Schema<IAdminUser>(
     },
     avatar: String,
     phone: String,
+    bio: { type: String, default: '', maxlength: 1000 },
+    socialLinks: {
+      type: [
+        {
+          platform: {
+            type: String,
+            enum: ['instagram', 'youtube', 'facebook', 'x', 'website', 'other'],
+          },
+          url: { type: String },
+        },
+      ],
+      default: [],
+    },
     modulePermissions: {
       type: {
         users: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
@@ -108,6 +125,7 @@ const AdminUserSchema = new Schema<IAdminUser>(
         notificationTemplates: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
         settings: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
         reviews: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
+        creatorRevenue: { canView: Boolean, canCreate: Boolean, canEdit: Boolean, canDelete: Boolean },
       },
       default: defaultModulePermissions,
     },

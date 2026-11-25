@@ -1,5 +1,14 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { AdminUserModel, IModulePermissions } from '../models/AdminUser';
+import { withCreatorGrants } from '../lib/creatorAccess';
+
+/** Influencers authorize against the creator pack, not only the stored document. */
+const applyRolePermissions = (user: any) => {
+  if (user?.role === 'influencer') {
+    user.modulePermissions = withCreatorGrants(user.modulePermissions);
+  }
+  return user;
+};
 
 // Role hierarchy: higher index = more power
 const ROLE_HIERARCHY = ['influencer', 'moderator', 'admin', 'superadmin'] as const;
@@ -26,6 +35,8 @@ export const checkUserPermission = async (
   const user = await AdminUserModel.findById(userId).lean();
   if (!user) return { allowed: false, error: 'Unauthorized — User not found', statusCode: 401 };
   if (!user.isActive) return { allowed: false, error: 'Unauthorized — Account is inactive', statusCode: 401 };
+
+  applyRolePermissions(user);
 
   // Superadmin bypass
   if (user.role === 'superadmin') return { allowed: true, user };
@@ -107,6 +118,8 @@ export const requireAnyPermission = (
       const user = await AdminUserModel.findById(decodedUser.id).lean();
       if (!user) return reply.status(401).send({ error: 'Unauthorized — User not found' });
       if (!user.isActive) return reply.status(401).send({ error: 'Unauthorized — Account is inactive' });
+
+      applyRolePermissions(user);
 
       if (user.role !== 'superadmin') {
         const allowed = checks.some(([moduleName, action]) => !!(user.modulePermissions as any)?.[moduleName]?.[action]);
@@ -238,6 +251,49 @@ export const requireCreatorReviewer = (action: 'canView' | 'canEdit' = 'canView'
         return reply.status(401).send({ error: 'Unauthorized — valid Bearer token required' });
       }
       return reply.status(500).send({ error: 'Internal Server Error' });
+    }
+  };
+};
+
+/**
+ * Creator revenue admin.
+ * Viewing is open to superadmin, admin, or creatorRevenue.canView / canEdit.
+ * Changing a rate is open to superadmin or creatorRevenue.canEdit only.
+ * Influencer accounts are always rejected, even if that flag is turned on, so a creator
+ * cannot open the cross-creator overview or edit any rate.
+ */
+export const requireCreatorRevenueAccess = (action: 'canView' | 'canEdit') => {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      await request.jwtVerify();
+      const decodedUser = request.user as { id: string; role: string };
+      if (!decodedUser || !decodedUser.id) {
+        return reply.status(401).send({ success: false, error: 'Unauthorized — valid Bearer token required' });
+      }
+
+      const user = await AdminUserModel.findById(decodedUser.id).lean();
+      if (!user || !user.isActive) {
+        return reply.status(401).send({ success: false, error: 'Unauthorized — Account is inactive or deleted' });
+      }
+
+      if (user.role === 'influencer') {
+        return reply.status(403).send({ success: false, error: 'Forbidden — Creators can only view their own revenue' });
+      }
+
+      const perms = (user.modulePermissions as any)?.creatorRevenue;
+      const allowed = action === 'canView'
+        ? user.role === 'superadmin' || user.role === 'admin' || !!perms?.canView || !!perms?.canEdit
+        : user.role === 'superadmin' || !!perms?.canEdit;
+      if (!allowed) {
+        return reply.status(403).send({ success: false, error: `Forbidden — creatorRevenue.${action} permission required` });
+      }
+
+      (request as any).adminUser = user;
+    } catch (err: any) {
+      if (err.statusCode === 401 || err.code === 'FST_JWT_NO_AUTHORIZATION_IN_HEADER' || err.code === 'FAST_JWT_EXPIRED') {
+        return reply.status(401).send({ success: false, error: 'Unauthorized — valid Bearer token required' });
+      }
+      return reply.status(500).send({ success: false, error: 'Internal Server Error' });
     }
   };
 };

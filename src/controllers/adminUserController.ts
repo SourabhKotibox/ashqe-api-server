@@ -5,7 +5,7 @@ import { AdminUserModel } from '../models/AdminUser';
 import { logger } from '../lib/logger';
 import { sendWelcomeEmail, sendAdminPasswordResetEmail } from '../lib/email';
 import { isRoleHigherThan } from '../middlewares/rbac';
-import { CREATOR_CATALOG_PERMISSIONS } from '../lib/creatorAccess';
+import { CREATOR_CATALOG_PERMISSIONS, sidebarSectionsFor, withCreatorGrants } from '../lib/creatorAccess';
 
 
 // Default module permissions to ensure we have all fields
@@ -31,6 +31,7 @@ const DEFAULT_MODULE_PERMISSIONS = {
   notificationTemplates: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   settings: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   reviews: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+  creatorRevenue: { canView: false, canCreate: false, canEdit: false, canDelete: false },
 };
 
 // Generate random password
@@ -54,6 +55,26 @@ const mergeModulePermissions = (existing: any) => {
     };
   }
   return merged;
+};
+
+/**
+ * Role editor and account reads.
+ * Influencers get the creator pack from the role, not the permissive defaults,
+ * so admin sections stay off unless they were stored on purpose.
+ */
+const presentModulePermissions = (role: string | undefined, existing: any) => {
+  if (role === 'influencer') return withCreatorGrants(existing);
+  return mergeModulePermissions(existing);
+};
+
+const presentAccount = (user: any) => {
+  const modulePermissions = presentModulePermissions(user.role, user.modulePermissions);
+  return {
+    ...user,
+    id: user._id?.toString(),
+    modulePermissions,
+    sections: sidebarSectionsFor(user.role, modulePermissions),
+  };
 };
 
 // Get all admin users with pagination
@@ -95,11 +116,7 @@ export const getAllAdminUsers = async (request: FastifyRequest, reply: FastifyRe
       AdminUserModel.countDocuments(filter),
     ]);
 
-    const usersWithId = users.map((user) => ({
-      ...user,
-      id: user._id?.toString(),
-      modulePermissions: mergeModulePermissions(user.modulePermissions),
-    }));
+    const usersWithId = users.map((user) => presentAccount(user));
 
     return reply.send({
       success: true,
@@ -133,11 +150,7 @@ export const getAdminUserById = async (request: FastifyRequest, reply: FastifyRe
 
     return reply.send({
       success: true,
-      data: {
-        ...user,
-        id: user._id?.toString(),
-        modulePermissions: mergeModulePermissions(user.modulePermissions),
-      },
+      data: presentAccount(user),
     });
   } catch (error: any) {
     logger.error({ error }, 'Error getting admin user by ID');
@@ -184,14 +197,17 @@ export const createAdminUser = async (request: FastifyRequest, reply: FastifyRep
       };
     }
 
+    const role = body.role || 'influencer';
+    const modulePermissions = role === 'influencer' ? withCreatorGrants(mergedModulePermissions) : mergedModulePermissions;
+
     // Create user
     const user = await AdminUserModel.create({
       email: body.email.toLowerCase(),
       name: body.name,
       phone: body.phone,
       passwordHash,
-      role: body.role || 'influencer',
-      modulePermissions: mergedModulePermissions,
+      role,
+      modulePermissions,
       createdBy: currentUser?.id,
     });
 
@@ -246,25 +262,34 @@ export const updateAdminUser = async (request: FastifyRequest, reply: FastifyRep
     if (body.email) updateData.email = body.email.toLowerCase();
     if (body.phone !== undefined) updateData.phone = body.phone;
     if (body.role) updateData.role = body.role;
-    if (body.modulePermissions) {
-      // Merge module permissions with defaults
-      const mergedModulePermissions = {
-        ...DEFAULT_MODULE_PERMISSIONS,
-        ...body.modulePermissions,
-      };
-      // Ensure each module's permissions are merged with defaults
-      for (const key of Object.keys(DEFAULT_MODULE_PERMISSIONS) as Array<keyof typeof DEFAULT_MODULE_PERMISSIONS>) {
-        mergedModulePermissions[key] = {
-          ...DEFAULT_MODULE_PERMISSIONS[key],
-          ...(body.modulePermissions?.[key] || {}),
+    if (body.modulePermissions || body.role === 'influencer') {
+      const existing = await AdminUserModel.findById(id).select('role modulePermissions').lean();
+      const nextRole = body.role || existing?.role;
+      let mergedModulePermissions: any = existing?.modulePermissions || {};
+      if (body.modulePermissions) {
+        // Merge module permissions with defaults
+        mergedModulePermissions = {
+          ...DEFAULT_MODULE_PERMISSIONS,
+          ...body.modulePermissions,
         };
-      }
-      // Old admin clients omit catalog keys. Keep the stored grant instead of resetting it.
-      const existingPerms = (await AdminUserModel.findById(id).select('modulePermissions').lean())?.modulePermissions as any;
-      for (const key of Object.keys(CREATOR_CATALOG_PERMISSIONS)) {
-        if (!body.modulePermissions[key] && existingPerms?.[key]) {
-          (mergedModulePermissions as any)[key] = existingPerms[key];
+        // Ensure each module's permissions are merged with defaults
+        for (const key of Object.keys(DEFAULT_MODULE_PERMISSIONS) as Array<keyof typeof DEFAULT_MODULE_PERMISSIONS>) {
+          mergedModulePermissions[key] = {
+            ...DEFAULT_MODULE_PERMISSIONS[key],
+            ...(body.modulePermissions?.[key] || {}),
+          };
         }
+        // Old admin clients omit catalog keys. Keep the stored grant instead of resetting it.
+        const existingPerms = existing?.modulePermissions as any;
+        for (const key of Object.keys(CREATOR_CATALOG_PERMISSIONS)) {
+          if (!body.modulePermissions[key] && existingPerms?.[key]) {
+            mergedModulePermissions[key] = existingPerms[key];
+          }
+        }
+      }
+      // A creator keeps the section pack even if the role form sends every box unchecked.
+      if (nextRole === 'influencer') {
+        mergedModulePermissions = withCreatorGrants(mergedModulePermissions);
       }
       updateData.modulePermissions = mergedModulePermissions;
     }
@@ -285,10 +310,7 @@ export const updateAdminUser = async (request: FastifyRequest, reply: FastifyRep
 
     return reply.send({
       success: true,
-      data: {
-        ...user,
-        id: user._id?.toString(),
-      },
+      data: presentAccount(user),
     });
   } catch (error: any) {
     logger.error({ error }, 'Error updating admin user');

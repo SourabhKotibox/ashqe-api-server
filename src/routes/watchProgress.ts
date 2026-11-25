@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { saveWatchProgress, getWatchProgressItem, clearWatchProgress, getWatchHistory, deleteWatchHistoryItem, clearAllWatchHistory } from '../controllers/watchProgressController';
+import { recordWatchHeartbeat } from '../controllers/creatorRevenueController';
 
 const watchProgressRoutes: FastifyPluginAsync = async (fastify) => {
   // Requires authentication
@@ -16,6 +17,9 @@ const watchProgressRoutes: FastifyPluginAsync = async (fastify) => {
 
   // POST /api/app/watch/progress - Save/upsert watch progress
   fastify.post('/watch/progress', saveWatchProgress);
+
+  // POST /api/app/watch/heartbeat - Credit creator revenue from real playback time
+  fastify.post('/watch/heartbeat', recordWatchHeartbeat);
 
   // DELETE /api/app/watch/progress/:contentId - Clear watch progress
   fastify.delete('/watch/progress/:contentId', clearWatchProgress);

@@ -7,7 +7,7 @@ import { CreatorApplicationModel } from '../models/CreatorApplication';
 import { AdminUserModel } from '../models/AdminUser';
 import { AdminNotificationModel } from '../models/AdminNotification';
 import { sendCreatorApplicationRejectedEmail, sendCreatorWelcomeEmail } from '../lib/email';
-import { CREATOR_MODULE_PERMISSIONS } from '../lib/creatorAccess';
+import { CREATOR_MODULE_PERMISSIONS, permissionsForRole, sidebarSectionsFor } from '../lib/creatorAccess';
 import { consumeRateLimit, creatorApplyLimits, creatorStatusLimits } from '../lib/rateLimit';
 import { logger } from '../lib/logger';
 
@@ -270,6 +270,8 @@ export const approveCreatorApplication = async (request: FastifyRequest, reply: 
     const temporaryPassword = generateTemporaryPassword();
     const passwordHash = await bcrypt.hash(temporaryPassword, 10);
 
+    // No per-creator revenue row is written here. Until a super admin sets an
+    // override, this creator earns at the global default watch-hour rate.
     const adminUser = await AdminUserModel.create({
       email,
       name: application.fullName,
@@ -296,6 +298,7 @@ export const approveCreatorApplication = async (request: FastifyRequest, reply: 
       .populate('adminUserId', 'name email role')
       .lean();
 
+    const modulePermissions = permissionsForRole(adminUser.role, adminUser.toObject().modulePermissions);
     return reply.send({
       success: true,
       message: emailSent
@@ -308,6 +311,8 @@ export const approveCreatorApplication = async (request: FastifyRequest, reply: 
           name: adminUser.name,
           email: adminUser.email,
           role: adminUser.role,
+          modulePermissions,
+          sections: sidebarSectionsFor(adminUser.role, modulePermissions),
         },
         temporaryPassword,
         emailSent,

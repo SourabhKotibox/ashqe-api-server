@@ -173,14 +173,14 @@ describe('Creator catalog access', { concurrency: 1, timeout: 180000 }, () => {
     if (mongod) await mongod.stop();
   });
 
-  test('influencers cannot create catalog rows until the stored permission pack is synced', async () => {
-    assert.equal((await call('POST', '/api/genres', creatorToken, { name: 'Too Soon' })).statusCode, 403);
-    assert.equal((await call('POST', '/api/actors', creatorToken, { name: 'Too Soon' })).statusCode, 403);
-    assert.equal((await call('POST', '/api/languages', creatorToken, { name: 'Too Soon', code: 'ts' })).statusCode, 403);
-    assert.equal((await call('POST', '/api/countries', creatorToken, { name: 'Too Soon', code: 'TS' })).statusCode, 403);
-    assert.equal((await call('GET', '/api/actors', creatorToken)).statusCode, 403);
+  test('influencer catalog access comes from the role and sync persists the stored flags', async () => {
+    assert.equal((await call('GET', '/api/actors', creatorToken)).statusCode, 200);
     assert.equal((await call('GET', '/api/languages', creatorToken)).statusCode, 200);
     assert.equal((await call('GET', '/api/countries?limit=10', creatorToken)).statusCode, 200);
+    const beforeSync = await bodyOf(await call('GET', '/api/auth/me', creatorToken));
+    for (const moduleName of ['genres', 'actors', 'directors', 'languages', 'countries']) {
+      assert.equal(beforeSync.user.modulePermissions[moduleName].canCreate, true, moduleName);
+    }
 
     const synced = await syncCreatorCatalogPermissions();
     assert.equal(synced.matched, 2);
