@@ -5,6 +5,7 @@ import { storeRefreshToken, revokeRefreshToken } from '../lib/redis';
 import { AdminUserModel } from '../models/AdminUser';
 import { logger } from '../lib/logger';
 import * as uploadHandler from '../lib/uploadHandler';
+import { permissionsForRole, sidebarSectionsFor } from '../lib/creatorAccess';
 
 export const login = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
@@ -118,12 +119,18 @@ export const getMe = async (request: FastifyRequest, reply: FastifyReply) => {
         };
       }
     }
+    // Influencers derive the creator pack from the role. Skip the permissive
+    // defaults above, which would mark admin sections viewable when unset.
+    const modulePermissions = admin.role === 'influencer'
+      ? permissionsForRole(admin.role, admin.modulePermissions)
+      : mergedModulePermissions;
     return { 
       user: { 
         ...admin, 
         id: (admin._id as any)?.toString(),
         mustChangePassword: !!(admin as any).mustChangePassword,
-        modulePermissions: mergedModulePermissions 
+        modulePermissions,
+        sections: sidebarSectionsFor(admin.role, modulePermissions),
       } 
     };
   } catch (error) {

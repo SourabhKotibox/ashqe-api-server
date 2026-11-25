@@ -1,5 +1,14 @@
 import type { FastifyRequest, FastifyReply } from 'fastify';
 import { AdminUserModel, IModulePermissions } from '../models/AdminUser';
+import { withCreatorGrants } from '../lib/creatorAccess';
+
+/** Influencers authorize against the creator pack, not only the stored document. */
+const applyRolePermissions = (user: any) => {
+  if (user?.role === 'influencer') {
+    user.modulePermissions = withCreatorGrants(user.modulePermissions);
+  }
+  return user;
+};
 
 // Role hierarchy: higher index = more power
 const ROLE_HIERARCHY = ['influencer', 'moderator', 'admin', 'superadmin'] as const;
@@ -26,6 +35,8 @@ export const checkUserPermission = async (
   const user = await AdminUserModel.findById(userId).lean();
   if (!user) return { allowed: false, error: 'Unauthorized — User not found', statusCode: 401 };
   if (!user.isActive) return { allowed: false, error: 'Unauthorized — Account is inactive', statusCode: 401 };
+
+  applyRolePermissions(user);
 
   // Superadmin bypass
   if (user.role === 'superadmin') return { allowed: true, user };
@@ -107,6 +118,8 @@ export const requireAnyPermission = (
       const user = await AdminUserModel.findById(decodedUser.id).lean();
       if (!user) return reply.status(401).send({ error: 'Unauthorized — User not found' });
       if (!user.isActive) return reply.status(401).send({ error: 'Unauthorized — Account is inactive' });
+
+      applyRolePermissions(user);
 
       if (user.role !== 'superadmin') {
         const allowed = checks.some(([moduleName, action]) => !!(user.modulePermissions as any)?.[moduleName]?.[action]);
