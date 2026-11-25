@@ -107,6 +107,7 @@ export const getMe = async (request: FastifyRequest, reply: FastifyReply) => {
       notificationTemplates: { canView: true, canCreate: false, canEdit: false, canDelete: false },
       settings: { canView: true, canCreate: false, canEdit: false, canDelete: false },
       reviews: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+      creatorRevenue: { canView: false, canCreate: false, canEdit: false, canDelete: false },
     };
     const mergedModulePermissions = { ...defaultModulePermissions } as any;
     if (admin.modulePermissions) {

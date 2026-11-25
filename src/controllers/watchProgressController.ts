@@ -9,6 +9,7 @@ import {
   resolveEffectiveUserPlan,
 } from '../lib/subscriptionAccess';
 import { resolveContent } from '../lib/contentResolver';
+import { logRevenueFailure, recordCreatorPlayback } from '../lib/creatorRevenueLedger';
 
 export const saveWatchProgress = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
@@ -70,9 +71,31 @@ export const saveWatchProgress = async (request: FastifyRequest, reply: FastifyR
       await UserModel.findByIdAndUpdate(userId, { $inc: { totalWatchTime: delta } });
     }
 
+    // Continue-watching still stores the playhead above. Revenue uses a stricter
+    // reading of the same call: forward movement only, capped by wall-clock time.
+    // App accounts are the viewers. Admin tokens are ignored here.
+    let revenue: { creditedSeconds: number; counted: boolean; duplicate: boolean; reason: string } | undefined;
+    const role = String((request as any).user?.role || '');
+    if (!role || role === 'user') {
+      try {
+        revenue = await recordCreatorPlayback({
+          source: 'progress',
+          viewerUserId: userId,
+          contentId,
+          episodeId: episodeId || null,
+          contentType: episodeId ? 'episode' : contentType,
+          profileId: profileId || null,
+          positionSeconds: Number(progressSeconds),
+        });
+      } catch (revenueError) {
+        logRevenueFailure(revenueError, 'Creator revenue progress credit failed');
+      }
+    }
+
     return reply.send({
       success: true,
       data: progressDoc,
+      ...(revenue ? { revenue } : {}),
     });
   } catch (error: any) {
     logger.error({ error }, 'Error saving watch progress');

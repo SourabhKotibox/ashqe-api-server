@@ -54,6 +54,7 @@ import reviewRoutes from './review';
 import viewsRoutes from './views';
 import partnerRoutes from './partners';
 import creatorRoutes from './creator';
+import creatorRevenueRoutes from './creatorRevenue';
 
 const router: FastifyPluginAsync = async (fastify) => {
   // Android App Links assetlinks.json - serve with correct Content-Type (register first to avoid conflicts)
@@ -120,6 +121,9 @@ const router: FastifyPluginAsync = async (fastify) => {
 
   // Creator / influencer applications, review, and dashboard (separate from Partner)
   fastify.register(creatorRoutes);
+
+  // Creator watch-hour revenue (influencer self-service + admin rate and overview)
+  fastify.register(creatorRevenueRoutes);
 
   // Like / Unlike route
   fastify.register(likeRoutes);

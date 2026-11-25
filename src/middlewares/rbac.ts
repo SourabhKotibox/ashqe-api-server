@@ -243,6 +243,49 @@ export const requireCreatorReviewer = (action: 'canView' | 'canEdit' = 'canView'
 };
 
 /**
+ * Creator revenue admin.
+ * Superadmin and admin are allowed. Other staff need creatorRevenue on their account.
+ * Influencer accounts are always rejected, even if that flag is turned on, so a creator
+ * cannot open the cross-creator overview.
+ */
+export const requireCreatorRevenueAccess = (action: 'canView' | 'canEdit') => {
+  return async (request: FastifyRequest, reply: FastifyReply) => {
+    try {
+      await request.jwtVerify();
+      const decodedUser = request.user as { id: string; role: string };
+      if (!decodedUser || !decodedUser.id) {
+        return reply.status(401).send({ success: false, error: 'Unauthorized — valid Bearer token required' });
+      }
+
+      const user = await AdminUserModel.findById(decodedUser.id).lean();
+      if (!user || !user.isActive) {
+        return reply.status(401).send({ success: false, error: 'Unauthorized — Account is inactive or deleted' });
+      }
+
+      if (user.role === 'influencer') {
+        return reply.status(403).send({ success: false, error: 'Forbidden — Creators can only view their own revenue' });
+      }
+
+      const isStaffAdmin = user.role === 'admin' || user.role === 'superadmin';
+      const perms = (user.modulePermissions as any)?.creatorRevenue;
+      const allowed = action === 'canView'
+        ? isStaffAdmin || !!perms?.canView || !!perms?.canEdit
+        : isStaffAdmin || !!perms?.canEdit;
+      if (!allowed) {
+        return reply.status(403).send({ success: false, error: `Forbidden — creatorRevenue.${action} permission required` });
+      }
+
+      (request as any).adminUser = user;
+    } catch (err: any) {
+      if (err.statusCode === 401 || err.code === 'FST_JWT_NO_AUTHORIZATION_IN_HEADER' || err.code === 'FAST_JWT_EXPIRED') {
+        return reply.status(401).send({ success: false, error: 'Unauthorized — valid Bearer token required' });
+      }
+      return reply.status(500).send({ success: false, error: 'Internal Server Error' });
+    }
+  };
+};
+
+/**
  * Fastify middleware: just authenticate and attach fresh user
  * Usage: fastify.get('/path', { onRequest: [authenticateAndAttach] }, handler)
  */

@@ -54,6 +54,7 @@ async function createAdmin() {
           notificationTemplates: { canView: true, canCreate: true, canEdit: true, canDelete: true },
           settings: { canView: true, canCreate: true, canEdit: true, canDelete: true },
           reviews: { canView: true, canCreate: true, canEdit: true, canDelete: true },
+          creatorRevenue: { canView: true, canCreate: true, canEdit: true, canDelete: true },
         },
       },
       $setOnInsert: { createdAt: new Date(), loginCount: 0 },

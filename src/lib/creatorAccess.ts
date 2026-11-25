@@ -45,6 +45,7 @@ export const CREATOR_MODULE_PERMISSIONS = {
   notificationTemplates: { ...NONE },
   settings: { ...NONE },
   reviews: { ...NONE },
+  creatorRevenue: { ...NONE },
 };
 
 const PENDING_STATUSES = ['draft', 'processing', 'moderation'] as const;

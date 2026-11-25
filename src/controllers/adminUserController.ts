@@ -31,6 +31,7 @@ const DEFAULT_MODULE_PERMISSIONS = {
   notificationTemplates: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   settings: { canView: true, canCreate: false, canEdit: false, canDelete: false },
   reviews: { canView: true, canCreate: false, canEdit: false, canDelete: false },
+  creatorRevenue: { canView: false, canCreate: false, canEdit: false, canDelete: false },
 };
 
 // Generate random password
