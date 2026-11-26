@@ -1,17 +1,21 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { UserModel } from '../models/User';
-import { SubscriptionPlanModel } from '../models/SubscriptionPlan';
-import { PlanLimitModel } from '../models/PlanLimit';
 import { LanguageModel } from '../models/Language';
-import { SubscriptionModel } from '../models/Subscription';
 import { messageCentral } from '../services/messageCentralService';
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 import { sendTemplateEmail } from '../lib/email';
 import { SettingsModel } from '../models/Settings';
 import jwt from 'jsonwebtoken';
-import { normalizePlanKey } from './subscriptionController';
+import { resolveAccountEntitlement, type AccountEntitlement } from '../lib/subscriptionAccess';
+import {
+  deviceIdentityForLogin,
+  publicLimitCount,
+  registerDevice,
+  toDeviceRecords,
+  type DeviceLoginResult,
+} from '../lib/accountLimits';
 
 const messageCentralService = messageCentral;
 
@@ -22,60 +26,70 @@ function normalizePhone(input: string): string {
   return digits;
 }
 
-/** Prefer live Subscription rows so admin-created plans show on login immediately */
-async function resolveSubscriptionPayload(user: any) {
-  const userId = user._id;
-  const liveSub = await SubscriptionModel.findOne({
-    userId,
-    status: 'active',
-    $or: [{ endDate: { $gte: new Date() } }, { endDate: null }, { endDate: { $exists: false } }],
-  })
-    .sort({ endDate: -1 })
-    .lean();
+function headerValue(request: FastifyRequest, name: string): string {
+  const value = request.headers[name];
+  if (Array.isArray(value)) return String(value[0] || '');
+  return value ? String(value) : '';
+}
 
-  if (liveSub) {
-    const planKey = normalizePlanKey(liveSub.plan);
-    if (
-      user.subscriptionPlan !== planKey ||
-      user.subscriptionStatus !== 'active' ||
-      !user.subscriptionExpiry ||
-      (liveSub.endDate &&
-        new Date(user.subscriptionExpiry).getTime() !== new Date(liveSub.endDate).getTime())
-    ) {
-      await UserModel.findByIdAndUpdate(userId, {
-        $set: {
-          subscriptionPlan: planKey,
-          subscriptionStatus: 'active',
-          subscriptionExpiry: liveSub.endDate || null,
-          subscriptionPlanId: liveSub.planId || null,
-          subscriptionPlanName: liveSub.plan || null, // Sync actual plan name from admin panel
-        },
-      });
-    }
-    return {
-      subscriptionPlan: liveSub.plan || planKey, // Return actual plan name instead of normalized key
-      subscriptionPlanName: liveSub.plan || null, // Return actual plan name from admin panel
-      subscriptionStatus: 'active' as const,
-      subscriptionExpiry: liveSub.endDate || null,
-      subscription: true,
-    };
-  }
-
-  const plan = String(user.subscriptionPlan || 'free').toLowerCase();
-  const status = String(user.subscriptionStatus || 'inactive').toLowerCase();
-  const expiry = user.subscriptionExpiry || null;
-  const active =
-    status === 'active' &&
-    plan !== 'free' &&
-    (!expiry || new Date(expiry) > new Date());
-
+function readDeviceInput(request: FastifyRequest, body?: any) {
+  const source = body || {};
   return {
-    subscriptionPlan: active ? (user.subscriptionPlanName || plan) : 'free', // Prefer actual plan name from admin panel
-    subscriptionPlanName: active ? (user.subscriptionPlanName || null) : null, // Return actual plan name from admin panel
-    subscriptionStatus: active ? 'active' : 'inactive',
-    subscriptionExpiry: expiry,
-    subscription: active,
+    deviceId: source.deviceId || headerValue(request, 'x-device-id'),
+    deviceName: source.deviceName || headerValue(request, 'x-device-name'),
+    deviceType: source.deviceType || headerValue(request, 'x-device-type'),
   };
+}
+
+function subscriptionPayload(ent: AccountEntitlement) {
+  const active = ent.active && ent.planKey !== 'free';
+  return {
+    subscriptionPlan: active ? ent.planName : 'free',
+    subscriptionPlanName: active ? ent.planName : null,
+    subscriptionStatus: active ? ('active' as const) : ('inactive' as const),
+    subscriptionExpiry: ent.expiry,
+    subscription: active,
+    profileLimitCount: publicLimitCount(ent.profileLimitCount),
+    deviceLimitCount: publicLimitCount(ent.deviceLimitCount),
+  };
+}
+
+/**
+ * Count this login against the plan device cap.
+ * The returned entitlement is resolved before the device write, which is correct:
+ * registering a device does not change the plan.
+ */
+async function attachLoginDevice(userDoc: any, request: FastifyRequest, body?: any) {
+  const ent = await resolveAccountEntitlement(userDoc._id);
+  const identity = deviceIdentityForLogin(String(userDoc._id), readDeviceInput(request, body));
+  const result = registerDevice(toDeviceRecords(userDoc.devices), identity, ent.deviceLimitCount);
+  if (result.ok) {
+    userDoc.devices = result.devices;
+    if (typeof userDoc.markModified === 'function') userDoc.markModified('devices');
+  }
+  return { ent, identity, result };
+}
+
+function isDeviceRejected(
+  result: DeviceLoginResult
+): result is Extract<DeviceLoginResult, { ok: false }> {
+  return result.ok === false;
+}
+
+function deviceLimitReply(reply: FastifyReply, result: DeviceLoginResult) {
+  if (!isDeviceRejected(result)) {
+    return reply.status(500).send({ success: false, message: 'Internal server error' });
+  }
+  return reply.status(200).send({
+    success: false,
+    message: result.message,
+    code: result.code,
+    deviceLimitCount: result.deviceLimitCount,
+  });
+}
+
+function deviceIsOverLimit(result: DeviceLoginResult): boolean {
+  return result.ok && result.overLimit;
 }
 
 // Validation schemas
@@ -90,6 +104,7 @@ const verifyOtpSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   deviceId: z.string().optional(),
   deviceName: z.string().optional(),
+  deviceType: z.string().optional(),
   referralCode: z.string().trim().optional(),
 });
 
@@ -171,7 +186,7 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
         errors: body.error.flatten().fieldErrors,
       });
     }
-    const { verificationId, otp, deviceId, deviceName, name: providedName } = body.data;
+    const { verificationId, otp, name: providedName } = body.data;
     const mobileNumber = normalizePhone(body.data.mobileNumber);
 
     if (mobileNumber.length !== 10) {
@@ -259,50 +274,9 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
       }
     }
 
-    // ── Manage Device Limits ──────────────────────────────────────────────────
-    if (deviceId) {
-      let deviceLimitCount = 1;
-      const isActive = userDoc.subscriptionStatus === 'active' &&
-                       (!userDoc.subscriptionExpiry || userDoc.subscriptionExpiry > new Date());
-
-      if (isActive && userDoc.subscriptionPlan !== 'free') {
-        // Look up plan by ID first (most reliable), fallback to name match
-        const planDoc = (userDoc as any).subscriptionPlanId
-          ? await SubscriptionPlanModel.findById((userDoc as any).subscriptionPlanId).lean()
-          : await SubscriptionPlanModel.findOne({
-              $or: [
-                { name: (userDoc as any).subscriptionPlanName || userDoc.subscriptionPlan },
-                { name: new RegExp(`^${userDoc.subscriptionPlan}$`, 'i') },
-              ],
-            }).lean();
-        if (planDoc) {
-          const limit = await PlanLimitModel.findOne({ planId: planDoc._id }).lean();
-          if (limit) deviceLimitCount = limit.deviceLimitCount;
-        }
-      }
-
-      const devices = (userDoc as any).devices || [];
-      const existingDeviceIndex = devices.findIndex((d: any) => d.deviceId === deviceId);
-
-      if (existingDeviceIndex !== -1) {
-        devices[existingDeviceIndex].lastActive = new Date();
-        devices[existingDeviceIndex].deviceName = deviceName || devices[existingDeviceIndex].deviceName;
-      } else {
-        const newDevice = {
-          deviceId,
-          deviceName: deviceName || 'Unknown Device',
-          deviceType: 'mobile',
-          lastActive: new Date(),
-          addedAt: new Date()
-        };
-        
-        while (devices.length >= deviceLimitCount) {
-          devices.sort((a: any, b: any) => new Date(a.lastActive).getTime() - new Date(b.lastActive).getTime());
-          devices.shift();
-        }
-        devices.push(newDevice);
-      }
-      (userDoc as any).devices = devices;
+    const deviceAttempt = await attachLoginDevice(userDoc, request, body.data);
+    if (!deviceAttempt.result.ok) {
+      return deviceLimitReply(reply, deviceAttempt.result);
     }
 
     userDoc.lastLogin = new Date();
@@ -315,13 +289,13 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
       name: userDoc.name,
       phone: (userDoc as any).phone,
       role: 'user' as const,
-      deviceId: deviceId || 'unknown',
+      deviceId: deviceAttempt.identity.deviceId,
     };
     const accessToken = server.jwt.sign(tokenPayload, {
       expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '365d',
     });
 
-    const sub = await resolveSubscriptionPayload(userDoc);
+    const sub = subscriptionPayload(deviceAttempt.ent);
 
     return reply.status(200).send({
       success: true,
@@ -335,9 +309,9 @@ export const verifyOtp = async (request: FastifyRequest, reply: FastifyReply) =>
       avatar: (userDoc as any).avatar || null,
       ...sub,
       walletBalance: (userDoc as any).walletBalance || 0,
-      profileLimitCount: (userDoc as any).profileLimitCount || 1,
       isNewUser: allUsersWithPhone.length === 0,
       expiresIn: 31536000,
+      ...(deviceIsOverLimit(deviceAttempt.result) ? { deviceLimitReached: true } : {}),
     });
   } catch (error) {
     console.error('Error verifying OTP:', error);
@@ -438,6 +412,9 @@ const registerSchema = z.object({
   name: z.string(),
   phone: z.string().optional(),
   referralCode: z.string().trim().optional(),
+  deviceId: z.string().optional(),
+  deviceName: z.string().optional(),
+  deviceType: z.string().optional(),
 });
 
 export const registerUser = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -464,10 +441,18 @@ export const registerUser = async (request: FastifyRequest, reply: FastifyReply)
         appUser.email = email;
         appUser.passwordHash = passwordHash;
         if (!appUser.name || appUser.name === phone) appUser.name = name;
+        const deviceAttempt = await attachLoginDevice(appUser, request, body.data);
+        if (!deviceAttempt.result.ok) {
+          return deviceLimitReply(reply, deviceAttempt.result);
+        }
         await appUser.save();
         const server = request.server as any;
-        const accessToken = server.jwt.sign({ id: appUser._id.toString(), name: appUser.name, role: 'user' }, { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '365d' });
-        return reply.status(200).send({ success: true, accessToken, userId: appUser._id.toString(), name: appUser.name, avatar: appUser.avatar || null, subscriptionPlan: appUser.subscriptionPlanName || appUser.subscriptionPlan || 'free', subscriptionPlanName: appUser.subscriptionPlanName || null, subscriptionStatus: appUser.subscriptionStatus || 'inactive', expiresIn: 31536000, linked: true });
+        const accessToken = server.jwt.sign(
+          { id: appUser._id.toString(), name: appUser.name, role: 'user', deviceId: deviceAttempt.identity.deviceId },
+          { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '365d' }
+        );
+        const sub = subscriptionPayload(deviceAttempt.ent);
+        return reply.status(200).send({ success: true, accessToken, userId: appUser._id.toString(), name: appUser.name, avatar: appUser.avatar || null, ...sub, expiresIn: 31536000, linked: true });
       }
     }
 
@@ -479,14 +464,24 @@ export const registerUser = async (request: FastifyRequest, reply: FastifyReply)
     const user = new UserModel({ email, passwordHash, name, phone: phone || undefined, profiles: [newProfile], preferredLanguage: 'Hindi', languageSelectionSkipped: false });
     await user.save();
 
+    const deviceAttempt = await attachLoginDevice(user, request, body.data);
+    if (!deviceAttempt.result.ok) {
+      return deviceLimitReply(reply, deviceAttempt.result);
+    }
+    await user.save();
+
     sendTemplateEmail('Registration', email, {
       user_name: name,
       site_url: process.env.FRONTEND_URL || process.env.ADMIN_PANEL_URL || 'http://localhost:5173',
     }).catch((err) => console.error('[email] Registration email failed:', err));
 
     const server = request.server as any;
-    const accessToken = server.jwt.sign({ id: user._id.toString(), name: user.name, role: 'user' }, { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '365d' });
-    return reply.status(200).send({ success: true, accessToken, userId: user._id.toString(), name: user.name, avatar: user.avatar || null, subscriptionPlan: user.subscriptionPlanName || user.subscriptionPlan || 'free', subscriptionPlanName: user.subscriptionPlanName || null, subscriptionStatus: user.subscriptionStatus || 'inactive', expiresIn: 31536000 });
+    const accessToken = server.jwt.sign(
+      { id: user._id.toString(), name: user.name, role: 'user', deviceId: deviceAttempt.identity.deviceId },
+      { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '365d' }
+    );
+    const sub = subscriptionPayload(deviceAttempt.ent);
+    return reply.status(200).send({ success: true, accessToken, userId: user._id.toString(), name: user.name, avatar: user.avatar || null, ...sub, expiresIn: 31536000 });
   } catch (error) {
     console.error('Register Error:', error);
     return reply.status(500).send({ success: false, message: 'Internal server error' });
@@ -494,7 +489,13 @@ export const registerUser = async (request: FastifyRequest, reply: FastifyReply)
 };
 
 // Login accepts email OR phone number (phone if no '@' in value)
-const loginSchema = z.object({ email: z.string().min(1), password: z.string() });
+const loginSchema = z.object({
+  email: z.string().min(1),
+  password: z.string(),
+  deviceId: z.string().optional(),
+  deviceName: z.string().optional(),
+  deviceType: z.string().optional(),
+});
 
 export const loginUser = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
@@ -530,12 +531,20 @@ export const loginUser = async (request: FastifyRequest, reply: FastifyReply) =>
     const valid = await bcrypt.compare(password, user.passwordHash);
     if (!valid) return reply.status(401).send({ success: false, message: 'Invalid credentials' });
 
+    const deviceAttempt = await attachLoginDevice(user, request, body.data);
+    if (!deviceAttempt.result.ok) {
+      return deviceLimitReply(reply, deviceAttempt.result);
+    }
+
     user.lastLogin = new Date();
     user.loginCount += 1;
     await user.save();
     const server = request.server as any;
-    const accessToken = server.jwt.sign({ id: user._id.toString(), name: user.name, role: 'user' }, { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '365d' });
-    const sub = await resolveSubscriptionPayload(user);
+    const accessToken = server.jwt.sign(
+      { id: user._id.toString(), name: user.name, role: 'user', deviceId: deviceAttempt.identity.deviceId },
+      { expiresIn: process.env.MOBILE_JWT_EXPIRES_IN || '365d' }
+    );
+    const sub = subscriptionPayload(deviceAttempt.ent);
     return reply.status(200).send({
       success: true,
       accessToken,
@@ -546,8 +555,8 @@ export const loginUser = async (request: FastifyRequest, reply: FastifyReply) =>
       avatar: user.avatar || null,
       ...sub,
       walletBalance: user.walletBalance || 0,
-      profileLimitCount: (user as any).profileLimitCount || 1,
       expiresIn: 31536000,
+      ...(deviceIsOverLimit(deviceAttempt.result) ? { deviceLimitReached: true } : {}),
     });
 
   } catch (error) {
@@ -613,9 +622,14 @@ export const googleAuth = async (request: FastifyRequest, reply: FastifyReply) =
     if (!payload.email) return reply.status(400).send({ success: false, message: 'No email in Google token' });
 
     const user = await findOrCreateSocialUser(payload.email, payload.name || payload.email.split('@')[0], 'google');
-    const accessToken = signUserToken(request, user);
-    const sub = await resolveSubscriptionPayload(user); // Resolve real plan name from live Subscription row
-    return reply.send({ success: true, accessToken, userId: user._id.toString(), name: user.name, avatar: user.avatar || null, ...sub, expiresIn: 31536000 });
+    const deviceAttempt = await attachLoginDevice(user, request, request.body);
+    if (!deviceAttempt.result.ok) {
+      return deviceLimitReply(reply, deviceAttempt.result);
+    }
+    await user.save();
+    const accessToken = signUserToken(request, user, deviceAttempt.identity.deviceId);
+    const sub = subscriptionPayload(deviceAttempt.ent);
+    return reply.send({ success: true, accessToken, userId: user._id.toString(), name: user.name, avatar: user.avatar || null, ...sub, expiresIn: 31536000, ...(deviceIsOverLimit(deviceAttempt.result) ? { deviceLimitReached: true } : {}) });
   } catch (error) {
     console.error('Google Auth Error:', error);
     return reply.status(500).send({ success: false, message: 'Google authentication failed' });
@@ -673,9 +687,14 @@ export const appleAuth = async (request: FastifyRequest, reply: FastifyReply) =>
     const name = [firstName, lastName].filter(Boolean).join(' ') || email.split('@')[0];
 
     const user = await findOrCreateSocialUser(email, name, 'apple');
-    const accessToken = signUserToken(request, user);
-    const sub = await resolveSubscriptionPayload(user); // Resolve real plan name from live Subscription row
-    return reply.send({ success: true, accessToken, userId: user._id.toString(), name: user.name, avatar: user.avatar || null, ...sub, expiresIn: 31536000 });
+    const deviceAttempt = await attachLoginDevice(user, request, request.body);
+    if (!deviceAttempt.result.ok) {
+      return deviceLimitReply(reply, deviceAttempt.result);
+    }
+    await user.save();
+    const accessToken = signUserToken(request, user, deviceAttempt.identity.deviceId);
+    const sub = subscriptionPayload(deviceAttempt.ent);
+    return reply.send({ success: true, accessToken, userId: user._id.toString(), name: user.name, avatar: user.avatar || null, ...sub, expiresIn: 31536000, ...(deviceIsOverLimit(deviceAttempt.result) ? { deviceLimitReached: true } : {}) });
   } catch (error) {
     console.error('Apple Auth Error:', error);
     return reply.status(500).send({ success: false, message: 'Apple authentication failed' });
@@ -689,11 +708,11 @@ export const logoutUser = async (request: FastifyRequest, reply: FastifyReply) =
     await request.jwtVerify();
 
     const userId = (request.user as any).id;
+    const deviceId = (request.user as any).deviceId;
 
-    if (userId) {
-      // Remove all devices for this user on logout
+    if (userId && deviceId && deviceId !== 'unknown') {
       await UserModel.findByIdAndUpdate(userId, {
-        $set: { devices: [] },
+        $pull: { devices: { deviceId } },
       });
     }
 

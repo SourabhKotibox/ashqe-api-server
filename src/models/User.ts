@@ -26,6 +26,8 @@ export interface IUser extends Document {
     deviceType: 'mobile' | 'tablet' | 'web' | 'tv' | 'other';
     deviceName?: string;
     lastSeen: Date;
+    lastActive?: Date;
+    addedAt?: Date;
   }>;
   preferredLanguage?: string;
   languageSelectionSkipped: boolean;
@@ -81,6 +83,8 @@ const UserSchema = new Schema<IUser>(
         deviceType: { type: String, enum: ['mobile', 'tablet', 'web', 'tv', 'other'] },
         deviceName: String,
         lastSeen: { type: Date, default: Date.now },
+        lastActive: { type: Date, default: Date.now },
+        addedAt: { type: Date, default: Date.now },
       },
     ],
     preferredLanguage: { type: String, default: 'Hindi' },

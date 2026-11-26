@@ -123,7 +123,7 @@ export async function syncUserSubscription(
     userId,
     {
       $set: {
-        subscriptionPlan: stillActive ? (data.plan || planKey) : 'free',
+        subscriptionPlan: stillActive ? planKey : 'free',
         subscriptionStatus: stillActive ? 'active' : status === 'cancelled' ? 'cancelled' : 'inactive',
         subscriptionExpiry: stillActive && endDate ? endDate : endDate || null,
         subscriptionPlanId: stillActive && data.planId ? data.planId : null,
@@ -279,6 +279,12 @@ export const createSubscription = async (request: FastifyRequest, reply: Fastify
     }
 
     const payload = await buildSubscriptionPayload(body);
+    if (payload.status === 'active' && payload.userId) {
+      await SubscriptionModel.updateMany(
+        { userId: payload.userId, status: 'active' },
+        { $set: { status: 'inactive' } }
+      );
+    }
     const subscription = await SubscriptionModel.create(payload);
 
     await syncUserSubscription(payload.userId, {
@@ -314,6 +320,12 @@ export const updateSubscription = async (request: FastifyRequest, reply: Fastify
     }
 
     const payload = await buildSubscriptionPayload(body, existing);
+    if (payload.status === 'active' && (payload.userId || existing.userId)) {
+      await SubscriptionModel.updateMany(
+        { userId: payload.userId || existing.userId, status: 'active', _id: { $ne: existing._id } },
+        { $set: { status: 'inactive' } }
+      );
+    }
     const updated = await SubscriptionModel.findByIdAndUpdate(
       id,
       { $set: payload },
@@ -478,6 +490,10 @@ export const createRazorpayOrder = async (request: FastifyRequest, reply: Fastif
       };
 
       const payload = await buildSubscriptionPayload(body);
+      await SubscriptionModel.updateMany(
+        { userId, status: 'active' },
+        { $set: { status: 'inactive' } }
+      );
       const subscription = await SubscriptionModel.create(payload);
 
       await syncUserSubscription(userId, {

@@ -14,19 +14,19 @@ import {
   canAccessContent,
   isQualityLocked,
   requiresSubscription,
-  resolveEffectiveUserPlan,
+  resolvePlaybackAccess,
 } from '../lib/subscriptionAccess';
 
 import { buildShareUrl } from '../lib/config';
 import { extractOptionalUser } from '../lib/jwtHelper';
 
-const getOptionalUser = async (request: FastifyRequest): Promise<{ userId: string; userPlan: string; profileId?: string } | null> => {
+const getOptionalUser = async (request: FastifyRequest): Promise<{ userId: string; userPlan: string; profileId?: string; streamsAllowed: boolean } | null> => {
   const user = extractOptionalUser(request);
   if (!user?.userId) return null;
 
   const profileId = (request.headers['x-profile-id'] as string | undefined) || undefined;
-  const userPlan = await resolveEffectiveUserPlan(user.userId);
-  return { userId: user.userId, userPlan, profileId };
+  const access = await resolvePlaybackAccess(user.userId, user.deviceId);
+  return { userId: user.userId, userPlan: access.userPlan, profileId, streamsAllowed: access.streamsAllowed };
 };
 
 // Helper to convert relative URLs to absolute URLs (local storage)
@@ -147,6 +147,7 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
     const userId = userInfo?.userId || null;
     const userPlan = userInfo?.userPlan || 'free';
     const profileId = userInfo?.profileId || null;
+    const streamsAllowed = userInfo?.streamsAllowed !== false;
 
     // Cast userId to ObjectId once for ALL DB lookups
     const userObjectId = userId ? new mongoose.Types.ObjectId(userId) : null;
@@ -260,7 +261,8 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
     }
 
     // ── Movie Playback ────────────────────────────────────────────────────
-    const isAccessible = canAccessContent(contentPlan, userPlan);
+    const planAccessible = canAccessContent(contentPlan, userPlan);
+    const isAccessible = planAccessible && streamsAllowed;
 
     let watchProgress = null;
     const progressTargetId = playbackTarget._id;
@@ -286,7 +288,7 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
       episode: currentEpisodeDoc?.episode || null,
       duration: playbackTarget.duration || content.duration || null,
       isFree: String(contentPlan).toLowerCase() === 'free' || !!currentEpisodeDoc?.isFree,
-      isLocked: !isAccessible,
+      isLocked: !planAccessible,
       hlsUrl: isAccessible ? toAbsoluteUrl(request, playableHls) : null,
       trailerUrl: toAbsoluteUrl(request, currentEpisodeDoc?.trailerUrl || content.trailerUrl),
       videoSettings: isAccessible
@@ -368,7 +370,7 @@ export const getWatchData = async (request: FastifyRequest, reply: FastifyReply)
           isLoggedIn: !!userId,
           userPlan,
           hasActiveSubscription: userPlan !== 'free',
-          canAccessCurrentEpisode: !currentVideo.isLocked,
+          canAccessCurrentEpisode: isAccessible,
           requiresSubscription: requiresSubscription(contentPlan),
         },
       },

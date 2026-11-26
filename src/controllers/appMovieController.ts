@@ -13,7 +13,7 @@ import {
   isContentLocked,
   isQualityLocked,
   requiresSubscription,
-  resolveEffectiveUserPlan,
+  resolvePlaybackAccess,
 } from '../lib/subscriptionAccess';
 
 // Helper to convert relative URLs to absolute URLs
@@ -36,12 +36,12 @@ const toAbsoluteUrl = (
 import { extractOptionalUser } from '../lib/jwtHelper';
 
 // Helper: try to extract userId and plan from JWT without throwing
-const getOptionalUser = async (request: FastifyRequest): Promise<{ userId: string; userPlan: string } | null> => {
+const getOptionalUser = async (request: FastifyRequest): Promise<{ userId: string; userPlan: string; streamsAllowed: boolean } | null> => {
   const user = extractOptionalUser(request);
   if (!user?.userId) return null;
 
-  const userPlan = await resolveEffectiveUserPlan(user.userId);
-  return { userId: user.userId, userPlan };
+  const access = await resolvePlaybackAccess(user.userId, user.deviceId);
+  return { userId: user.userId, userPlan: access.userPlan, streamsAllowed: access.streamsAllowed };
 };
 
 // ── GET /api/app/movies/:id ────────────────────────────────────────────────────
@@ -58,6 +58,7 @@ export const getMovieDetail = async (request: FastifyRequest, reply: FastifyRepl
     const userInfo = await getOptionalUser(request);
     const userId = userInfo?.userId || null;
     const userPlan = userInfo?.userPlan || 'free';
+    const streamsAllowed = userInfo?.streamsAllowed !== false;
 
     // ── 1. Fetch Movie with populated cast/crew/genres ────────────────────────
     const movie = await MovieModel.findById(id)
@@ -157,7 +158,7 @@ export const getMovieDetail = async (request: FastifyRequest, reply: FastifyRepl
 
     // ── 6. Video settings (quality options) ──────────────────────────────────
     const contentPlan = movie.planRequired || 'free';
-    const contentAccessible = canAccessContent(contentPlan, userPlan);
+    const contentAccessible = canAccessContent(contentPlan, userPlan) && streamsAllowed;
     const hlsUrl = movie.hlsUrl || movie.videoUrl || null;
     const qualities: any[] = movie.videoQualities || [];
 

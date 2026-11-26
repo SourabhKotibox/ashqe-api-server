@@ -145,7 +145,7 @@
                 "verify-otp"
               ]
             },
-            "description": "Verify OTP and receive JWT.\n\n**Test script auto-saves** `accessToken` and `userId` to collection variables.\n\n**Body fields:**\n- `mobileNumber` — 10-digit number\n- `verificationId` — from Send OTP response\n- `otp` — 4–8 digit code\n- `name` — display name (used only on first registration)\n- `deviceId` — unique device identifier for device-limit tracking\n- `deviceName` — human-readable device name\n\n**Response includes:**\n- `accessToken`, `userId`, `name`, `email`, `phone`, `avatar`\n- `subscriptionPlan`, `subscriptionStatus`, `subscriptionExpiry`\n- `isNewUser` — true if this was first registration\n- `expiresIn` — 604800 (7 days)",
+            "description": "Verify OTP and receive JWT.\n\n**Test script auto-saves** `accessToken` and `userId` to collection variables.\n\n**Body fields:**\n- `mobileNumber` — 10-digit number\n- `verificationId` — from Send OTP response\n- `otp` — 4–8 digit code\n- `name` — display name (used only on first registration)\n- `deviceId` — unique device identifier for device-limit tracking\n- `deviceName` — human-readable device name\n\n**Response includes:**\n- `accessToken`, `userId`, `name`, `email`, `phone`, `avatar`\n- `subscriptionPlan`, `subscriptionPlanName`, `subscriptionStatus`, `subscriptionExpiry`, `subscription`\n- `profileLimitCount`, `deviceLimitCount` — caps from the live subscription (free / expired = 1)\n- `isNewUser` — true if this was first registration\n- `expiresIn`\n\n**Device limit:** HTTP 200 with `success: false`. The app reads `message`. No token is issued and no other device is signed out.\n```json\n{ \"success\": false, \"code\": \"DEVICE_LIMIT_REACHED\", \"message\": \"Your plan allows 2 devices. Sign out on another device, or remove it from Manage Devices, then try again.\", \"deviceLimitCount\": 2 }\n```\n`deviceId`, `deviceName`, and `deviceType` are optional. When they are omitted, the login uses one shared `web:<userId>` slot so the website still counts toward the cap.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"mobileNumber\": \"9876543210\",\n  \"verificationId\": \"<verificationId from Send OTP>\",\n  \"otp\": \"1234\",\n  \"name\": \"Test User\",\n  \"deviceId\": \"device-abc-001\",\n  \"deviceName\": \"My Android\"\n}",
@@ -256,7 +256,7 @@
                 "login"
               ]
             },
-            "description": "Login with email or phone number + password.\n\nThe `email` field accepts either an email address OR a phone number (no `@` → treated as phone).\n\n**Returns:** accessToken, userId, name, email, phone, avatar, subscriptionPlan, subscriptionStatus, walletBalance",
+            "description": "Login with email or phone number + password.\n\nThe `email` field accepts either an email address OR a phone number (no `@` → treated as phone).\n\nOptional body fields: `deviceId`, `deviceName`, `deviceType`. Headers `x-device-id`, `x-device-name`, `x-device-type` are also accepted. When no device id is sent, the login uses one shared `web:<userId>` device so the website counts toward the plan cap.\n\n**Returns:** accessToken, userId, name, email, phone, avatar, subscriptionPlan, subscriptionPlanName, subscriptionStatus, subscriptionExpiry, profileLimitCount, deviceLimitCount, walletBalance.\n\n**Device limit:** HTTP 200, `success: false`, `code: DEVICE_LIMIT_REACHED`, `message` the client can show. No token is issued.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"SecurePass123\"\n}",
@@ -388,7 +388,7 @@
                 "logout"
               ]
             },
-            "description": "Logout. Clears the device list for the user.\nAlways returns 200 — even if token is expired.\nInvalidate the token on the client side after calling this."
+            "description": "Logout. Removes only the device stored in this token (`deviceId`). Other signed-in devices stay registered.\nAlways returns 200 — even if the token is expired.\nResponse: `{ \"success\": true, \"message\": \"Logged out successfully\" }`.\nInvalidate the token on the client side after calling this."
           }
         },
         {
@@ -3143,7 +3143,7 @@
                 "devices"
               ]
             },
-            "description": "Returns list of logged-in devices:\n- `deviceId`, `deviceName`, `deviceType`, `lastActive`, `addedAt`"
+            "description": "Returns logged-in devices in `data` (array). Each item includes `deviceId`, `deviceName`, `deviceType`, `lastSeen`, `lastActive`, and `addedAt`. `lastActive` mirrors `lastSeen` when an older row has no separate timestamp.\n\nAlso returns `deviceLimitCount` for the current plan (free / basic 1, standard 2, premium 4, unless the plan limit row overrides it)."
           }
         },
         {
@@ -3199,7 +3199,7 @@
                 "profiles"
               ]
             },
-            "description": "Returns all sub-profiles for the account (e.g. Kids, Adult).\nMax allowed profiles is determined by plan's `profileLimitCount`."
+            "description": "Returns all sub-profiles in `data`. Each profile includes `_id`, `name`, `avatar`, `isKids`, `language`, `maturityLevel`.\n\nAlso returns `profileLimitCount` and `profilesUsed`. Switching profiles is done by the app storing the chosen `_id` and sending it as the `x-profile-id` header. There is no separate switch call."
           }
         },
         {
@@ -3227,7 +3227,7 @@
                 "profiles"
               ]
             },
-            "description": "Create a new sub-profile. Returns 403 if plan limit reached.",
+            "description": "Create a new sub-profile.\n\nThe cap comes from the live subscription, not from `plan` or `subscriptionPlan` in the body (the app may send those; they are ignored).\n\nFree / no plan / expired: 1 profile. Basic: 1. Standard: 2. Premium: 4. A PlanLimit row overrides the tier.\n\n**Limit reached (HTTP 403)** — the app shows `message`:\n```json\n{\n  \"success\": false,\n  \"code\": \"PROFILE_LIMIT_REACHED\",\n  \"message\": \"Profile limit of 2 reached on your current plan.\",\n  \"profileLimitCount\": 2\n}\n```\n\n`data` on success is the created profile and includes `_id`.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"name\": \"Kids Profile\",\n  \"isKids\": true,\n  \"maturityLevel\": 7,\n  \"language\": \"Hindi\"\n}",
