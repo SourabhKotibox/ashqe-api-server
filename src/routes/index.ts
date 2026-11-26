@@ -55,32 +55,12 @@ import viewsRoutes from './views';
 import partnerRoutes from './partners';
 import creatorRoutes from './creator';
 import creatorRevenueRoutes from './creatorRevenue';
+import { sendAssetLinks } from '../lib/assetLinks';
 
 const router: FastifyPluginAsync = async (fastify) => {
-  // Android App Links assetlinks.json - serve with correct Content-Type (register first to avoid conflicts)
-  fastify.get('/.well-known/assetlinks.json', async (request, reply) => {
-    try {
-      const fs = await import('fs');
-      const path = await import('path');
-      const { fileURLToPath } = await import('url');
-      const __filename = fileURLToPath(import.meta.url);
-      const __dirname = path.dirname(__filename);
-      // At runtime, __dirname will be the dist directory due to bundling
-      const filePath = path.join(__dirname, '../public/.well-known/assetlinks.json');
-      
-      if (fs.existsSync(filePath)) {
-        const fileContent = fs.readFileSync(filePath, 'utf-8');
-        return reply
-          .header('Content-Type', 'application/json')
-          .send(fileContent);
-      } else {
-        return reply.status(404).send({ error: 'File not found' });
-      }
-    } catch (error) {
-      console.error('Error serving assetlinks.json:', error);
-      return reply.status(500).send({ error: 'Internal server error' });
-    }
-  });
+  // Android App Links. Fingerprints come from ANDROID_SHA256_FINGERPRINTS when set,
+  // otherwise from public/.well-known/assetlinks.json.
+  fastify.get('/.well-known/assetlinks.json', sendAssetLinks);
 
   fastify.register(viewsRoutes);
   fastify.register(reviewRoutes);

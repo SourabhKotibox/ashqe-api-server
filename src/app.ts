@@ -9,6 +9,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import router from './routes';
 import { requestContext } from './lib/context';
+import { sendAssetLinks } from './lib/assetLinks';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -125,21 +126,9 @@ fastify.register(router);
 // Android App Links assetlinks.json - serve with correct Content-Type
 // Use setNotFoundHandler to intercept 404s and serve assetlinks.json
 fastify.setNotFoundHandler(async (request, reply) => {
-  if (request.url === '/.well-known/assetlinks.json') {
-    try {
-      const fs = await import('fs');
-      const path = await import('path');
-      const filePath = path.join(__dirname, '../public/.well-known/assetlinks.json');
-      
-      if (fs.existsSync(filePath)) {
-        const fileContent = fs.readFileSync(filePath, 'utf-8');
-        return reply
-          .header('Content-Type', 'application/json')
-          .send(fileContent);
-      }
-    } catch (error) {
-      console.error('Error serving assetlinks.json:', error);
-    }
+  const pathname = request.url.split('?')[0];
+  if (pathname === '/.well-known/assetlinks.json') {
+    return sendAssetLinks(request, reply);
   }
   
   // Default 404 handler
