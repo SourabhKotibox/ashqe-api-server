@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { isInfluencerRequest, requestUserId } from '../lib/creatorAccess';
 import { resolveRevenuePeriod } from '../lib/creatorRevenue';
+import { creatorContentAnalytics } from '../lib/creatorContentAnalytics';
 import {
   RevenueValidationError,
   adminRevenueOverview,
@@ -23,6 +24,10 @@ const periodQuery = z.object({
   page: z.coerce.number().optional(),
   limit: z.coerce.number().optional(),
   creatorId: z.string().optional(),
+  sort: z.string().optional(),
+  order: z.string().optional(),
+  type: z.string().optional(),
+  status: z.string().optional(),
 });
 
 const heartbeatSchema = z.object({
@@ -55,6 +60,16 @@ const readPeriod = (query: { period?: string; from?: string; to?: string }) => {
     to: query.to || null,
   });
   return resolved;
+};
+
+/** Content analytics defaults to all-time. from/to without period means custom. */
+const readContentPeriod = (query: { period?: string; from?: string; to?: string }) => {
+  const hasRange = Boolean(query.from || query.to);
+  return resolveRevenuePeriod({
+    period: query.period || (hasRange ? 'custom' : 'all'),
+    from: query.from || null,
+    to: query.to || null,
+  });
 };
 
 const creatorGuard = (request: FastifyRequest, reply: FastifyReply) => {
@@ -234,6 +249,69 @@ export const putCreatorRevenueRate = async (request: FastifyRequest, reply: Fast
     if (error instanceof RevenueValidationError) return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
     logRevenueFailure(error, 'Error updating creator revenue rate');
     return reply.status(500).send({ success: false, error: 'Failed to update the watch-hour rate' });
+  }
+};
+
+const sendContentAnalytics = async (
+  request: FastifyRequest,
+  reply: FastifyReply,
+  creatorId: string | null
+) => {
+  const parsed = periodQuery.safeParse(request.query || {});
+  if (!parsed.success) return reply.status(400).send({ success: false, error: 'Validation failed' });
+  const period = readContentPeriod(parsed.data);
+  if (period.ok === false) return reply.status(400).send({ success: false, error: period.error });
+  const data = await creatorContentAnalytics({
+    creatorId,
+    period: period.period,
+    page: clampPage(parsed.data.page, 1, 10_000),
+    limit: clampPage(parsed.data.limit, 20, 100),
+    sort: parsed.data.sort,
+    order: parsed.data.order,
+    type: parsed.data.type,
+    status: parsed.data.status,
+  });
+  const { pagination, ...rest } = data;
+  return reply.send({ success: true, data: rest, pagination });
+};
+
+/**
+ * GET /api/creator/revenue/content
+ * Own catalog only. A creatorId query is ignored.
+ * Query: period (today|7d|30d|custom|all, default all), from, to (YYYY-MM-DD),
+ * sort (watchHours|revenue, default watchHours), order (asc|desc, default desc),
+ * type (movie|series), status (published|draft|processing|moderation|rejected|removed),
+ * page, limit (default 20, max 100).
+ */
+export const getCreatorContentAnalytics = async (request: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const creatorId = creatorGuard(request, reply);
+    if (!creatorId) return;
+    return await sendContentAnalytics(request, reply, creatorId);
+  } catch (error: any) {
+    if (error instanceof RevenueValidationError) return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
+    logRevenueFailure(error, 'Error building creator content analytics');
+    return reply.status(500).send({ success: false, error: 'Failed to load content analytics' });
+  }
+};
+
+/**
+ * GET /api/admin/creators/:creatorId/content-analytics
+ * GET /api/admin/content-analytics (?creatorId= optional)
+ * Same query and JSON shape as the creator route. Admin rows also include every
+ * creator when creatorId is omitted. Requires creator revenue view access
+ * (superadmin, admin, or creatorRevenue.canView). Influencers are rejected.
+ */
+export const getAdminContentAnalytics = async (request: FastifyRequest, reply: FastifyReply) => {
+  try {
+    const params = (request.params || {}) as { creatorId?: string };
+    const query = (request.query || {}) as { creatorId?: string };
+    const creatorId = params.creatorId || query.creatorId || null;
+    return await sendContentAnalytics(request, reply, creatorId);
+  } catch (error: any) {
+    if (error instanceof RevenueValidationError) return reply.status(error.statusCode || 400).send({ success: false, error: error.message });
+    logRevenueFailure(error, 'Error building admin content analytics');
+    return reply.status(500).send({ success: false, error: 'Failed to load content analytics' });
   }
 };
 

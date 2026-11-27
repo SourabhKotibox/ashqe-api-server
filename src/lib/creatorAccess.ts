@@ -126,6 +126,11 @@ export const sidebarSectionsFor = (role: string | undefined, permissions: any): 
  * are kept, and a stored `true` is never turned off. A stored `false` on a pack
  * flag is turned back on, so editing a creator in the role UI cannot lock them
  * out of creator sections. Other roles must not be passed through this helper.
+ *
+ * Content deletion is the exception. `movies.canDelete`, `tvShows.canDelete`,
+ * and `mediaLibrary.canDelete` are forced off even when the stored document
+ * says true. A creator must not be able to remove a film that is earning.
+ * Catalog modules (genres, people, languages, countries) keep their own delete.
  */
 export const withCreatorGrants = (stored: any) => {
   const next: Record<string, any> = stored && typeof stored === 'object' ? { ...stored } : {};
@@ -142,6 +147,9 @@ export const withCreatorGrants = (stored: any) => {
     }
     next[moduleName] = current;
   }
+  next.movies = { ...(next.movies || {}), canDelete: false };
+  next.tvShows = { ...(next.tvShows || {}), canDelete: false };
+  next.mediaLibrary = { ...(next.mediaLibrary || {}), canDelete: false };
   return next;
 };
 
@@ -155,8 +163,10 @@ export const permissionsForRole = (role: string | undefined, stored: any) => {
  * Approval copies CREATOR_MODULE_PERMISSIONS onto the new account. Reads for an
  * influencer also derive that pack from the role, so a missing or cleared
  * document still authorizes creator sections. This sync persists the same true
- * flags for influencer accounts that were created earlier. It only sets those
- * flags to true, so it does not revoke other modules and does not touch other roles.
+ * flags for influencer accounts that were created earlier. It only sets pack
+ * flags to true, plus the content-delete lock (movies, tvShows, and
+ * mediaLibrary canDelete forced false). It does not revoke other modules and
+ * does not touch other roles.
  * Idempotent: running it again is a no-op once the flags are already on.
  * Also available as `npx tsx scripts/sync-creator-permissions.ts`.
  * The API runs this on startup.
@@ -171,6 +181,13 @@ export const syncCreatorCatalogPermissions = async () => {
       $set[path] = true;
       needsGrant.push({ [path]: { $ne: true } });
     }
+  }
+  // Persist the content-delete lock. Reads already force these flags off;
+  // writing them keeps a staff editor from looking at a stale `true`.
+  for (const moduleName of ['movies', 'tvShows', 'mediaLibrary']) {
+    const path = `modulePermissions.${moduleName}.canDelete`;
+    $set[path] = false;
+    needsGrant.push({ [path]: true });
   }
   const result = await AdminUserModel.updateMany(
     { role: 'influencer', $or: needsGrant },
@@ -248,6 +265,140 @@ export const denyInfluencerModerationAction = (request: FastifyRequest, reply: F
     error: 'Creators cannot approve, reject, or change featured and trending flags.',
   });
   return true;
+};
+
+/**
+ * Creators cannot delete movies, series, episodes, or media folders.
+ * Seasons are not a separate collection: removing a season means deleting its
+ * episodes, and that path is rejected here too.
+ *
+ * Who can delete a movie, series, or episode: an admin with that module's
+ * canDelete flag, or a superadmin. Moderators stay blocked even if canDelete
+ * was granted. Influencers cannot, even when the stored document says canDelete.
+ *
+ * What creators can still do: edit metadata on their own rows, replace the
+ * video on a draft or rejected title, upload new files, and delete an
+ * unreferenced media file they uploaded (a file that is not attached to a
+ * movie, series, episode, or anything else). Referenced files stay blocked
+ * by the existing in-use check (409).
+ *
+ * What creators cannot do, besides DELETE:
+ * - move a published title to any other status (unpublish)
+ * - pull a title out of moderation back to draft, processing, or rejected
+ * - set status to rejected
+ * - clear hlsUrl, videoUrl, sourceVideoUrl, hlsS3Prefix, or videoQualities
+ *   once a video is stored
+ * - replace that video while the title is published or in review
+ * Poster, thumbnail, trailer, and description edits stay allowed.
+ */
+const VIDEO_FIELDS = ['hlsUrl', 'videoUrl', 'sourceVideoUrl', 'hlsS3Prefix'] as const;
+
+const videoText = (value: unknown) => (value == null ? '' : String(value).trim());
+
+const qualityUrls = (value: unknown): string[] => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => videoText((entry as { url?: unknown })?.url))
+    .filter(Boolean)
+    .sort();
+};
+
+export const denyInfluencerContentDelete = (request: FastifyRequest, reply: FastifyReply): boolean => {
+  if (!isInfluencerRequest(request)) return false;
+  reply.status(403).send({
+    success: false,
+    error: 'Creators cannot delete content. Only an admin can remove a movie, series, season, or episode.',
+  });
+  return true;
+};
+
+/** Movies, series, and episodes can be deleted by admin or superadmin only. */
+export const denyNonAdminContentDelete = (request: FastifyRequest, reply: FastifyReply): boolean => {
+  const role = requestRole(request);
+  if (role === 'admin' || role === 'superadmin') return false;
+  reply.status(403).send({
+    success: false,
+    error: 'Only an admin or super admin can delete a movie, series, season, or episode.',
+  });
+  return true;
+};
+
+export const blockInfluencerContentRemoval = (
+  request: FastifyRequest,
+  reply: FastifyReply,
+  body: Record<string, any> | undefined,
+  existing: Record<string, any> | null | undefined
+): boolean => {
+  if (!isInfluencerRequest(request) || !body || !existing) return false;
+
+  if ('status' in body) {
+    const next = body.status;
+    const previous = existing.status;
+    const blankStatus = next == null || next === '';
+    if (previous === 'published' && (blankStatus || next !== 'published')) {
+      reply.status(403).send({
+        success: false,
+        error: 'Creators cannot unpublish content.',
+      });
+      return true;
+    }
+    if (next === 'rejected') {
+      reply.status(403).send({
+        success: false,
+        error: 'Creators cannot reject their own content.',
+      });
+      return true;
+    }
+    if (previous === 'moderation' && next !== 'moderation' && next !== 'published') {
+      reply.status(403).send({
+        success: false,
+        error: 'Creators cannot withdraw content that is already in review.',
+      });
+      return true;
+    }
+  }
+
+  const locked = existing.status === 'published' || existing.status === 'moderation';
+  for (const field of VIDEO_FIELDS) {
+    if (!(field in body)) continue;
+    const previous = videoText(existing[field]);
+    const next = videoText(body[field]);
+    if (previous && !next) {
+      reply.status(403).send({
+        success: false,
+        error: 'Creators cannot remove the video from their content.',
+      });
+      return true;
+    }
+    if (locked && previous && next && previous !== next) {
+      reply.status(403).send({
+        success: false,
+        error: 'Creators cannot replace the video on content that is published or in review.',
+      });
+      return true;
+    }
+  }
+
+  if ('videoQualities' in body) {
+    const previous = qualityUrls(existing.videoQualities);
+    const next = qualityUrls(body.videoQualities);
+    if (previous.length > 0 && next.length === 0) {
+      reply.status(403).send({
+        success: false,
+        error: 'Creators cannot remove the video from their content.',
+      });
+      return true;
+    }
+    if (locked && previous.length > 0 && previous.join('|') !== next.join('|')) {
+      reply.status(403).send({
+        success: false,
+        error: 'Creators cannot replace the video on content that is published or in review.',
+      });
+      return true;
+    }
+  }
+
+  return false;
 };
 
 export const countPendingSubmissions = async (userId: string) => {
