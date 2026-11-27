@@ -7,7 +7,15 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { logger } from '../lib/logger';
 import uploadHandler from '../lib/uploadHandler';
-import { assignCreatedBy, creatorFileTooLargeReason, isInfluencerRequest, ownershipClause, requestUserId, sameOwner } from '../lib/creatorAccess';
+import {
+  assignCreatedBy,
+  creatorFileTooLargeReason,
+  denyInfluencerContentDelete,
+  isInfluencerRequest,
+  ownershipClause,
+  requestUserId,
+  sameOwner,
+} from '../lib/creatorAccess';
 import { countMediaUses, inUseMessage } from '../lib/mediaReferences';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -139,6 +147,7 @@ export const createFolder = async (request: FastifyRequest, reply: FastifyReply)
 // Delete folder
 export const deleteFolder = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
+    if (denyInfluencerContentDelete(request, reply)) return;
     const { id } = request.params as { id: string };
     if (!Types.ObjectId.isValid(id)) {
       return reply.status(400).send({ success: false, error: 'Invalid folder ID' });
@@ -536,7 +545,11 @@ export const reprocessMediaHls = async (request: FastifyRequest, reply: FastifyR
   }
 };
 
-// Delete file
+// Delete file.
+// Creators may delete only an unreferenced file they uploaded (canUpload).
+// A file attached to a movie, series, episode, or any other record returns 409,
+// so clearing a catalog URL is blocked elsewhere and this route cannot finish
+// the removal. Staff with mediaLibrary.canDelete follow the same in-use rule.
 export const deleteFile = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
     const { id } = request.params as { id: string };

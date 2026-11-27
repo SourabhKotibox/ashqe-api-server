@@ -4,7 +4,15 @@ import { TVShowModel } from '../models/TVShow';
 import { Types } from 'mongoose';
 import { logger } from '../lib/logger';
 import { isRawLocalVideo } from '../lib/contentResolver';
-import { assignCreatedBy, isInfluencerRequest, ownershipClause, requestUserId, sameOwner } from '../lib/creatorAccess';
+import {
+  assignCreatedBy,
+  blockInfluencerContentRemoval,
+  denyNonAdminContentDelete,
+  isInfluencerRequest,
+  ownershipClause,
+  requestUserId,
+  sameOwner,
+} from '../lib/creatorAccess';
 import { releaseDocumentMedia } from '../lib/uploadHandler';
 
 export const getAllEpisodes = async (request: FastifyRequest, reply: FastifyReply) => {
@@ -168,6 +176,10 @@ export const updateEpisode = async (request: FastifyRequest, reply: FastifyReply
     if (!existingEpisode) {
       return reply.status(404).send({ success: false, error: 'Episode not found' });
     }
+    if (isInfluencerRequest(request)) {
+      const show = await TVShowModel.findById(existingEpisode.tvShowId).select('status').lean();
+      if (blockInfluencerContentRemoval(request, reply, body, { ...existingEpisode, status: show?.status })) return;
+    }
     if (body.tvShowId && isInfluencerRequest(request)) {
       const show = await TVShowModel.findById(body.tvShowId).select('createdBy').lean();
       if (!show || !sameOwner(show, requestUserId(request))) {
@@ -224,6 +236,7 @@ export const updateEpisode = async (request: FastifyRequest, reply: FastifyReply
 
 export const deleteEpisode = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
+    if (denyNonAdminContentDelete(request, reply)) return;
     const { id } = request.params as { id: string };
 
     const episode = await EpisodeModel.findOneAndDelete({ _id: id, ...ownershipClause(request) });

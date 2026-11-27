@@ -55,6 +55,7 @@ const CreatorWatchCreditSchema = new Schema<ICreatorWatchCredit>(
 CreatorWatchCreditSchema.index({ idempotencyKey: 1 }, { unique: true });
 CreatorWatchCreditSchema.index({ creatorId: 1, watchedAt: -1 });
 CreatorWatchCreditSchema.index({ viewerUserId: 1, contentId: 1, watchedAt: -1 });
+CreatorWatchCreditSchema.index({ creatorId: 1, day: 1, titleId: 1, applied: 1 });
 
 export const CreatorWatchCreditModel = mongoose.model<ICreatorWatchCredit>(
   'CreatorWatchCredit',

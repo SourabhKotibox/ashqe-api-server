@@ -5,7 +5,9 @@ import { logger } from '../lib/logger';
 import { sendApprovalEmail, sendRejectionEmail } from '../lib/email';
 import {
   assignCreatedBy,
+  blockInfluencerContentRemoval,
   blockInfluencerEditorial,
+  denyNonAdminContentDelete,
   denyInfluencerModerationAction,
   enforceCreatorSubmissionQuota,
   isInfluencerRequest,
@@ -255,6 +257,7 @@ export const updateMovie = async (request: FastifyRequest, reply: FastifyReply) 
     }
 
     if (blockInfluencerEditorial(request, reply, body)) return;
+    if (blockInfluencerContentRemoval(request, reply, body, existingMovie)) return;
     if (isInfluencerRequest(request) && body.status === 'moderation') {
       const merged = { ...existingMovie, ...body };
       if (body.copyrightAttested !== true) {
@@ -486,6 +489,7 @@ export const getPendingApprovals = async (request: FastifyRequest, reply: Fastif
 // Get movie by ID
 export const deleteMovie = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
+    if (denyNonAdminContentDelete(request, reply)) return;
     const { id } = request.params as { id: string };
 
     const movie = await MovieModel.findOneAndDelete({ _id: id, ...ownershipClause(request) });
@@ -520,6 +524,7 @@ export const updateMovieStatus = async (request: FastifyRequest, reply: FastifyR
     if (!existing) {
       return reply.status(404).send({ success: false, error: 'Movie not found' });
     }
+    if (blockInfluencerContentRemoval(request, reply, { status }, existing)) return;
 
     const updateData: any = { status };
     if (rejectionReason && status === 'rejected') {

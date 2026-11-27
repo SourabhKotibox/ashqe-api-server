@@ -1,5 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 import {
+  getAdminContentAnalytics,
+  getCreatorContentAnalytics,
   getCreatorRevenueOverview,
   getCreatorRevenueRate,
   getCreatorRevenueSeries,
@@ -22,6 +24,7 @@ const creatorRevenueRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/creator/revenue/summary', creator, getCreatorRevenueSummary);
   fastify.get('/creator/revenue/titles', creator, getCreatorRevenueTitles);
   fastify.get('/creator/revenue/timeseries', creator, getCreatorRevenueSeries);
+  fastify.get('/creator/revenue/content', creator, getCreatorContentAnalytics);
 
   const view = { onRequest: [requireCreatorRevenueAccess('canView')] };
   const edit = { onRequest: [requireCreatorRevenueAccess('canEdit')] };
@@ -30,6 +33,8 @@ const creatorRevenueRoutes: FastifyPluginAsync = async (fastify) => {
   fastify.get('/admin/creator-revenue/creators/:creatorId/rate', view, getCreatorWatchHourRate);
   fastify.put('/admin/creator-revenue/creators/:creatorId/rate', edit, putCreatorWatchHourRate);
   fastify.get('/admin/creator-revenue/overview', view, getCreatorRevenueOverview);
+  fastify.get('/admin/content-analytics', view, getAdminContentAnalytics);
+  fastify.get('/admin/creators/:creatorId/content-analytics', view, getAdminContentAnalytics);
 };
 
 export default creatorRevenueRoutes;

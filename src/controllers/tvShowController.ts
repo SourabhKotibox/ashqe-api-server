@@ -6,7 +6,9 @@ import { logger } from '../lib/logger';
 import { sendApprovalEmail, sendRejectionEmail } from '../lib/email';
 import {
   assignCreatedBy,
+  blockInfluencerContentRemoval,
   blockInfluencerEditorial,
+  denyNonAdminContentDelete,
   denyInfluencerModerationAction,
   enforceCreatorSubmissionQuota,
   isInfluencerRequest,
@@ -257,6 +259,7 @@ export const updateTVShow = async (request: FastifyRequest, reply: FastifyReply)
     }
 
     if (blockInfluencerEditorial(request, reply, body)) return;
+    if (blockInfluencerContentRemoval(request, reply, body, existingTVShow)) return;
     if (isInfluencerRequest(request) && body.status === 'moderation') {
       const merged = { ...existingTVShow, ...body };
       if (body.copyrightAttested !== true) {
@@ -488,6 +491,7 @@ export const getPendingApprovals = async (request: FastifyRequest, reply: Fastif
 // Get tvShow by ID
 export const deleteTVShow = async (request: FastifyRequest, reply: FastifyReply) => {
   try {
+    if (denyNonAdminContentDelete(request, reply)) return;
     const { id } = request.params as { id: string };
 
     const tvShow = await TVShowModel.findOneAndDelete({ _id: id, ...ownershipClause(request) });
@@ -524,6 +528,7 @@ export const updateTVShowStatus = async (request: FastifyRequest, reply: Fastify
     if (!existing) {
       return reply.status(404).send({ success: false, error: 'TVShow not found' });
     }
+    if (blockInfluencerContentRemoval(request, reply, { status }, existing)) return;
 
     const updateData: any = { status };
     if (rejectionReason && status === 'rejected') {
